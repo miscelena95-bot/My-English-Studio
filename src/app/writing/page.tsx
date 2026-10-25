@@ -5,6 +5,7 @@ import { listSubmissions } from "@/lib/server/writing";
 import { listMistakes } from "@/lib/server/mistakes";
 import { CATEGORY_LABELS as MISTAKE_LABELS, type MistakeCategory } from "@/lib/domain/mistake-categories";
 import { aiStatus } from "@/lib/ai";
+import { AiQuota } from "@/components/ai/AiQuota";
 import { formatDate } from "@/lib/format";
 import { Badge, Card, CardLink, Notice, PageHeader, SectionHead } from "@/components/ui";
 
@@ -21,6 +22,7 @@ export default async function WritingPage() {
   return (
     <div className="page">
       <PageHeader eyebrow="Writing Workshop" title="Write, get feedback, revise" lede="Realistic tasks with a clear audience and purpose. Feedback separates real errors from optional improvements, and you revise your own text before seeing a revised version." />
+      <div style={{ marginBottom: 24 }}><AiQuota /></div>
       {!aiStatus().configured && <div style={{ marginBottom: 24 }}><Notice tone="warning" title="AI feedback isn't configured">You can still write, save drafts, revise and compare versions, and use a structured self-review checklist. <Link href="/settings#ai">Set up AI feedback</Link>.</Notice></div>}
       <div className="dash-grid">
         <div className="stack-l">

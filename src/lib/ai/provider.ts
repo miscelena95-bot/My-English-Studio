@@ -30,7 +30,7 @@ export interface AIProvider {
 export class AIError extends Error {
   constructor(
     message: string,
-    public readonly kind: "not-configured" | "auth" | "rate-limit" | "unavailable" | "refused" | "invalid-output" | "bad-request",
+    public readonly kind: "not-configured" | "auth" | "rate-limit" | "quota" | "unavailable" | "refused" | "invalid-output" | "bad-request",
   ) {
     super(message);
     this.name = "AIError";
@@ -42,9 +42,11 @@ export function userMessageFor(e: unknown): string {
   if (e instanceof AIError) {
     switch (e.kind) {
       case "not-configured":
-        return "The AI tutor isn't configured yet. Add an API key in .env.local (see Settings → AI & voice) to enable this feature.";
+        return "The AI tutor isn't configured yet. See Settings → AI tutor to add an API key.";
       case "auth":
-        return "The AI provider rejected the API key. Please check ANTHROPIC_API_KEY in your configuration.";
+        return "The AI provider rejected the API key. Please check the key in your configuration (Settings → AI tutor).";
+      case "quota":
+        return "You've used today's free AI requests. They reset around 9:00 (Italian time). Your work is saved — meanwhile, everything without AI still works.";
       case "rate-limit":
         return "The AI provider is busy right now (rate limit). Please wait a moment and try again.";
       case "unavailable":

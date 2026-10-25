@@ -21,7 +21,7 @@ export default async function NewsPage({ searchParams }: { searchParams: Promise
       {!configured ? (
         <div className="stack-l">
           <Notice tone="info" title="Live news isn't configured">
-            Add a free <code>GUARDIAN_API_KEY</code> to <code>.env.local</code> to see recent articles here (<Link href="/settings">details in Settings</Link>). Until then, use the prepared activities below, or <Link href="/real-english#add">add an article you&apos;re reading</Link>.
+            Add a free <code>GUARDIAN_API_KEY</code> (Vercel environment variables, or <code>.env.local</code> when running locally) to see recent articles here (<Link href="/settings">details in Settings</Link>). Until then, use the prepared activities below, or <Link href="/real-english#add">add an article you&apos;re reading</Link>.
           </Notice>
           <div className="grid-2">{evergreen.map((u) => <CardLink key={u.id} href={`/real-english/${u.id}`}><h3>{u.title}</h3><p className="small muted mb-0">{u.objective}</p></CardLink>)}</div>
         </div>

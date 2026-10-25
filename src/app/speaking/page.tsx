@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CATEGORY_LABELS, FLUENCY_DRILLS, SCENARIOS, type ScenarioCategory } from "@/content/speaking/scenarios";
 import { listSessions } from "@/lib/server/speaking";
 import { aiStatus } from "@/lib/ai";
+import { AiQuota } from "@/components/ai/AiQuota";
 import { getProfile } from "@/lib/server/profile";
 import { formatDate, plural } from "@/lib/format";
 import { Badge, Card, CardLink, Notice, PageHeader, SectionHead } from "@/components/ui";
@@ -22,6 +23,7 @@ export default async function SpeakingPage({ searchParams }: { searchParams: Pro
   return (
     <div className="page">
       <PageHeader eyebrow="Speaking Studio" title="Speak first. Polish later." lede="Realistic conversations with an AI partner that remembers your goals, recycles your expressions and corrects you the way you choose. Use your voice or type as you'd speak." />
+      <div style={{ marginBottom: 24 }}><AiQuota /></div>
       {!ai.configured && (
         <div style={{ marginBottom: 24 }}>
           <Notice tone="warning" title="AI conversations need an API key">

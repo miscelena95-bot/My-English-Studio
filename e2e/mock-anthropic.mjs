@@ -1,4 +1,5 @@
-// Test double for the Anthropic Messages API, used ONLY by the e2e tests.
+// Test double for the Anthropic Messages API and the Gemini generateContent API,
+// used ONLY by the tests.
 // It returns schema-shaped JSON so the real SDK, parsing and validation code
 // paths run end-to-end. It is never used by the application itself.
 import http from "node:http";
@@ -62,10 +63,29 @@ function respond(body) {
   return { error: "unknown schema" };
 }
 
+/** Gemini: same canned answers, translated from/to the generateContent format. */
+function gemini(req, res, body) {
+  const model = decodeURIComponent(req.url.match(/models\/([^:]+):generateContent/)?.[1] ?? "");
+  calls.push({ url: req.url, headers: req.headers, body, model });
+  const json = (status, payload) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(payload));
+  if (req.headers["x-goog-api-key"] !== "test-key")
+    return json(400, { error: { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID" }] } });
+  if (model.startsWith("exhausted"))
+    return json(429, { error: { code: 429, message: "You exceeded your current quota.", status: "RESOURCE_EXHAUSTED", details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } });
+  if (model.startsWith("schema-strict") && body.generationConfig?.responseJsonSchema)
+    return json(400, { error: { code: 400, message: "Invalid JSON payload: unsupported schema keyword.", status: "INVALID_ARGUMENT" } });
+  const system = body.systemInstruction?.parts?.[0]?.text ?? "";
+  const schema = body.generationConfig?.responseJsonSchema ?? JSON.parse(system.match(/JSON Schema:\n(.*)$/s)?.[1] ?? "{}");
+  const messages = (body.contents ?? []).map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("") }));
+  const out = respond({ messages, output_config: { format: { schema } } });
+  json(200, { candidates: [{ content: { role: "model", parts: [{ text: "thinking…", thought: true }, { text: JSON.stringify(out) }] }, finishReason: "STOP" }], modelVersion: model });
+}
+
 const server = http.createServer((req, res) => {
   let data = "";
   req.on("data", (c) => (data += c));
   req.on("end", () => {
+    if (req.method === "POST" && req.url.startsWith("/v1beta/models/")) return gemini(req, res, JSON.parse(data || "{}"));
     if (req.method !== "POST" || !req.url.startsWith("/v1/messages")) {
       res.writeHead(404).end();
       return;

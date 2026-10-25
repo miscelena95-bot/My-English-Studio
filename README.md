@@ -12,7 +12,7 @@ Everything in the app is in English. Italian appears only as a short note where 
 
 ```bash
 npm install
-cp .env.example .env.local     # optional: add ANTHROPIC_API_KEY for the AI tutor
+cp .env.example .env.local     # optional: add GEMINI_API_KEY (free tier) or ANTHROPIC_API_KEY for the AI tutor
 npm run dev                    # http://localhost:3000
 ```
 
@@ -42,7 +42,8 @@ Vercel has no persistent disk, so the app uses a hosted [Turso](https://turso.te
    | `DATABASE_URL` | the `libsql://…` URL |
    | `DATABASE_AUTH_TOKEN` | the Turso token |
    | `STUDIO_PASSCODE` | a passcode of your choice — **required** (see below) |
-   | `ANTHROPIC_API_KEY` | optional, enables the AI tutor |
+   | `GEMINI_API_KEY` | optional, enables the AI tutor on Google's free tier |
+   | `ANTHROPIC_API_KEY` | optional, enables the AI tutor with Claude (paid) |
    | `GUARDIAN_API_KEY` | optional, enables news |
 4. **Deploy.** Open the URL; the browser asks for the passcode (any username).
 
@@ -76,8 +77,12 @@ All configuration is via environment variables (see `.env.example`). Secrets are
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Enables the AI tutor (conversations, reports, writing feedback, answer checks, activity building). Paid usage. |
-| `AI_MODEL` | Optional. Default `claude-opus-5-5`. |
+| `ANTHROPIC_API_KEY` | Enables the AI tutor (conversations, reports, writing feedback, answer checks, activity building) with Anthropic Claude. Paid usage. |
+| `GEMINI_API_KEY` | Enables the AI tutor with Google Gemini. Free tier available (about 20 requests per model per day; check yours in Google AI Studio → Rate limit). On the free tier Google may use what you send to improve its products. |
+| `AI_PROVIDER` | Optional: `anthropic` or `gemini`. If empty, the app uses whichever key is set (Anthropic first). |
+| `AI_MODEL` | Optional. Defaults: `claude-opus-5-5` (Anthropic), `gemini-3.8-flash` (Gemini). |
+| `AI_FALLBACK_MODEL` | Gemini only. Model used when the first one is rate-limited or out of daily quota. Default `gemini-3.6-flash`; `none` disables it. |
+| `AI_DAILY_LIMIT` | Gemini only. Free requests per model per day, used by the "Free AI requests today" meter. Default `20`. |
 | `AI_BASE_URL` | Optional override of the API base URL (used by the tests). |
 | `HTTPS_PROXY` / `NO_PROXY` | Respected by `npm run check:links` (exit 0 = all OK, 1 = a broken link, 2 = some links unreachable from this network). |
 | `GUARDIAN_API_KEY` | Optional. Free developer key from <https://open-platform.theguardian.com/access/> for recent news. |
@@ -109,7 +114,7 @@ src/
     domain/               Pure, tested logic: text normalisation, SRS, mistake categorisation and
                           prioritisation, progress metrics, planner, recommendations, level estimate
     exercises/            Exercise types, deterministic grading, vocabulary exercise generation
-    ai/                   Provider interface, Anthropic implementation, prompts, Zod schemas,
+    ai/                   Provider interface, Anthropic and Gemini implementations, prompts, Zod schemas,
                           post-validation of AI output
     server/               Data access + services (speaking, writing, feedback, insights, news)
     db/                   Drizzle schema + SQLite client (migrations in /drizzle)
@@ -131,18 +136,18 @@ Key decisions:
 ```bash
 npm run typecheck
 npm run lint
-npm test            # 115 unit/integration tests (Vitest)
-npm run test:e2e    # production build + 18 Playwright tests
+npm test            # 129 unit/integration tests (Vitest)
+npm run test:e2e    # production build + 22 Playwright tests (the AI specs run with both providers)
 npm run check:links # verify external content links (needs normal internet access)
 ```
 
-Coverage includes grading (alternatives, contractions, typos vs grammar), SRS scheduling, mistake categorisation and prioritisation, progress/streak/week maths, the planner and recommendations, validation schemas, AI output validation, the Anthropic provider (request shape, parsing, error mapping) against a local test double, server flows on an in-memory database (exercises → mistakes, vocabulary reviews, conversations and reports, writing feedback and revisions), **content integrity** (every listed answer grades as correct, every model answer passes its own check, all cross-references exist), and end-to-end flows in a real browser with and without AI.
+Coverage includes grading (alternatives, contractions, typos vs grammar), SRS scheduling, mistake categorisation and prioritisation, progress/streak/week maths, the planner and recommendations, validation schemas, AI output validation, the Anthropic and Gemini providers (request shape, parsing, error mapping, quota fallback) against a local test double, server flows on an in-memory database (exercises → mistakes, vocabulary reviews, conversations and reports, writing feedback and revisions), **content integrity** (every listed answer grades as correct, every model answer passes its own check, all cross-references exist), and end-to-end flows in a real browser with and without AI.
 
-The AI end-to-end tests use `e2e/mock-anthropic.mjs`, a test double that returns schema-shaped JSON. It verifies the app's request → parse → validate → render path; it cannot verify the quality of real model output.
+The AI tests use `e2e/mock-anthropic.mjs`, a test double of both the Anthropic and the Gemini APIs that returns schema-shaped JSON. It verifies the app's request → parse → validate → render path; it cannot verify the quality of real model output.
 
 ## Privacy
 
-- Data lives in the local SQLite file. Only text is stored, never audio. The only personal detail requested is an optional first name.
+- Data lives in the app's database (the local SQLite file, or your Turso database on Vercel). Only text is stored, never audio. The only personal detail requested is an optional first name.
 - Settings → *Your data*: download everything as JSON, delete conversation transcripts, delete writing, or reset the studio. You can also choose not to keep conversation transcripts after the report.
 - When the AI tutor is enabled, your messages and texts are sent to the AI provider to generate feedback. Check the provider's data-retention terms; don't assume a particular policy.
 
@@ -162,4 +167,5 @@ The AI end-to-end tests use `e2e/mock-anthropic.mjs`, a test double that returns
 - Level estimates are informal and conservative: the short diagnostic never suggests C1, and later suggestions require substantial evidence.
 - Single learner, no accounts. Use `STUDIO_PASSCODE` (or a proper auth layer) for any public deployment.
 - The Vercel/Turso setup was verified locally with the same libSQL driver (file and in-memory databases) and a production build, but not against a live Turso database or an actual Vercel deployment — no accounts were available in the build environment. The first deploy is the real test; the build log shows the migration step's result.
-- Only the Anthropic provider is implemented; adding another means implementing `AIProvider` in `src/lib/ai`.
+- Two AI providers are implemented (Anthropic and Gemini); adding another means implementing `AIProvider` in `src/lib/ai`.
+- The Gemini provider was tested against the local test double only (Google's API wasn't reachable from the build environment). The request format follows Google's REST API; if a model rejects the JSON schema, the app retries once with the schema described in the prompt, and every answer is still validated. The usage meter counts the app's own requests; Google AI Studio's figures are authoritative.

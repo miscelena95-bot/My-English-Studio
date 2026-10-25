@@ -3,6 +3,7 @@ import { getProfile } from "@/lib/server/profile";
 import { aiStatus } from "@/lib/ai";
 import { newsConfigured } from "@/lib/server/news";
 import { Badge, PageHeader } from "@/components/ui";
+import { AiQuota } from "@/components/ai/AiQuota";
 import { SettingsForm } from "@/components/settings/SettingsForm";
 import { VoiceSettings } from "@/components/settings/VoiceSettings";
 import { BreakControl, DeleteControls } from "@/components/settings/DataControls";
@@ -32,15 +33,19 @@ export default async function SettingsPage() {
           <p className="small">
             The AI tutor powers conversations, conversation reports, writing feedback, checking open answers and building activities from articles. It runs only on the server; the API key is never sent to the browser.
           </p>
+          {ai.configured && <AiQuota detailed />}
           {!ai.configured && (
-            <ol className="small">
-              <li>Create an API key at <a href="https://console.anthropic.com/" target="_blank" rel="noreferrer">console.anthropic.com</a> (paid usage).</li>
-              <li>Copy <code>.env.example</code> to <code>.env.local</code> and set <code>ANTHROPIC_API_KEY=…</code>.</li>
-              <li>Optional: set <code>AI_MODEL</code> (default <code>claude-opus-5-5</code>).</li>
-              <li>Restart the app (<code>npm run dev</code> or <code>npm start</code>).</li>
-            </ol>
+            <div className="stack-s small">
+              <p className="mb-0"><strong>Free option — Google Gemini:</strong></p>
+              <ol className="mb-0">
+                <li>Open <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer">Google AI Studio → API keys</a> and create a key (the free tier needs no card — don&apos;t set up billing unless you want to pay).</li>
+                <li>Add it as <code>GEMINI_API_KEY</code>: on Vercel in <em>Settings → Environment Variables</em>, then redeploy; locally in <code>.env.local</code>, then restart the app.</li>
+                <li>Optional: <code>AI_MODEL</code> (default <code>gemini-3.8-flash</code>) and <code>AI_FALLBACK_MODEL</code> (default <code>gemini-3.6-flash</code>, used when the first model&apos;s daily quota runs out).</li>
+              </ol>
+              <p className="mb-0"><strong>Paid option — Anthropic Claude:</strong> create a key at <a href="https://console.anthropic.com/" target="_blank" rel="noreferrer">console.anthropic.com</a> and add it as <code>ANTHROPIC_API_KEY</code> the same way (optional <code>AI_MODEL</code>, default <code>claude-opus-5-5</code>).</p>
+            </div>
           )}
-          <p className="tiny muted">Privacy: your messages and writing are sent to the AI provider to generate feedback. Check your provider&apos;s data-retention terms — don&apos;t assume a particular policy. Avoid including confidential client details in practice texts.</p>
+          <p className="tiny muted">Privacy: your messages and writing are sent to the AI provider to generate feedback. Check your provider&apos;s data-retention terms — don&apos;t assume a particular policy. On free tiers (such as Gemini&apos;s), providers may use what you send to improve their products, and people may review it. Avoid including confidential client details in practice texts.</p>
         </section>
 
         <section className="card stack" aria-labelledby="s-voice">
@@ -59,7 +64,7 @@ export default async function SettingsPage() {
         <section className="card stack" aria-labelledby="s-data">
           <h2 id="s-data">Your data</h2>
           <p className="small">
-            Everything is stored locally in a SQLite database on the machine running the app. Only text is stored (never audio). The only personal detail collected is the optional name above.
+            Everything is stored in the app&apos;s own database: a SQLite file on the machine running the app, or your Turso database when deployed to Vercel. Only text is stored (never audio). The only personal detail collected is the optional name above.
           </p>
           <p><a className="btn btn-small" href="/api/export" download>Download all my data (JSON)</a></p>
           <DeleteControls />

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 
 /**
  * Data model for My English Studio.
@@ -358,3 +358,14 @@ export const progressSnapshots = sqliteTable("progress_snapshots", {
   data: text("data", { mode: "json" }).$type<unknown>().notNull(),
   ...timestamps,
 });
+
+/** AI requests that reached the provider, per quota day (Pacific time) and model. */
+export const aiUsage = sqliteTable(
+  "ai_usage",
+  {
+    day: text("day").notNull(),
+    model: text("model").notNull(),
+    requests: integer("requests").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.model] })],
+);
