@@ -68,7 +68,7 @@ const CACHE_MINUTES = 60;
 export async function latestNews(section: string): Promise<{ items: Array<typeof schema.contentResources.$inferSelect>; error?: string; cached: boolean }> {
   const db = getDb();
   const tag = `news:${section}`;
-  const cached = db
+  const cached = await db
     .select()
     .from(schema.contentResources)
     .where(and(eq(schema.contentResources.kind, tag), gte(schema.contentResources.createdAt, new Date(Date.now() - CACHE_MINUTES * 60000))))
@@ -86,22 +86,23 @@ export async function latestNews(section: string): Promise<{ items: Array<typeof
   });
   try {
     const res = await fetch(`https://content.guardianapis.com/search?${params}`, { cache: "no-store", signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return { items: olderCache(tag), cached: true, error: res.status === 401 || res.status === 403 ? "The Guardian API rejected the key." : `The news service returned an error (${res.status}).` };
+    if (!res.ok) return { items: await olderCache(tag), cached: true, error: res.status === 401 || res.status === 403 ? "The Guardian API rejected the key." : `The news service returned an error (${res.status}).` };
     const items = parseGuardian(await res.json());
     for (const it of items) {
-      const exists = db.select().from(schema.contentResources).where(eq(schema.contentResources.externalId, it.externalId)).get();
-      if (exists) db.update(schema.contentResources).set({ createdAt: new Date(), kind: tag }).where(eq(schema.contentResources.id, exists.id)).run();
+      const exists = await db.select().from(schema.contentResources).where(eq(schema.contentResources.externalId, it.externalId)).get();
+      if (exists) await db.update(schema.contentResources).set({ createdAt: new Date(), kind: tag }).where(eq(schema.contentResources.id, exists.id)).run();
       else
-        db.insert(schema.contentResources)
+        await db
+          .insert(schema.contentResources)
           .values({ kind: tag, title: it.title, url: it.url, sourceName: "The Guardian", publishedAt: it.publishedAt, summary: it.standfirst, sourceText: it.excerpt, externalId: it.externalId })
           .run();
     }
-    return { items: db.select().from(schema.contentResources).where(eq(schema.contentResources.kind, tag)).orderBy(desc(schema.contentResources.publishedAt)).limit(8).all(), cached: false };
+    return { items: await db.select().from(schema.contentResources).where(eq(schema.contentResources.kind, tag)).orderBy(desc(schema.contentResources.publishedAt)).limit(8).all(), cached: false };
   } catch {
-    return { items: olderCache(tag), cached: true, error: "The news service couldn't be reached. Showing previously loaded articles, if any." };
+    return { items: await olderCache(tag), cached: true, error: "The news service couldn't be reached. Showing previously loaded articles, if any." };
   }
 }
 
-function olderCache(tag: string) {
+async function olderCache(tag: string) {
   return getDb().select().from(schema.contentResources).where(eq(schema.contentResources.kind, tag)).orderBy(desc(schema.contentResources.publishedAt)).limit(8).all();
 }

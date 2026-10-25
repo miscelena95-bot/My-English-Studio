@@ -10,10 +10,10 @@ import { AddResourceForm } from "@/components/content/ResourceClients";
 
 export const metadata: Metadata = { title: "Real English" };
 
-export default function RealEnglishPage() {
-  const profile = getProfile();
-  const progress = new Map(getDb().select().from(schema.contentProgress).all().map((p) => [p.contentId, p]));
-  const resources = getDb().select().from(schema.contentResources).where(notLike(schema.contentResources.kind, "news:%")).orderBy(desc(schema.contentResources.createdAt)).all();
+export default async function RealEnglishPage() {
+  const profile = await getProfile();
+  const progress = new Map((await getDb().select().from(schema.contentProgress).all()).map((p) => [p.contentId, p]));
+  const resources = await getDb().select().from(schema.contentResources).where(notLike(schema.contentResources.kind, "news:%")).orderBy(desc(schema.contentResources.createdAt)).all();
   const interests = new Set(profile.interests);
   const cats = (Object.keys(CATEGORY_INFO) as RealEnglishCategory[]).sort((a, b) => Number(!interests.has(CATEGORY_INFO[a].interest)) - Number(!interests.has(CATEGORY_INFO[b].interest)));
   return (

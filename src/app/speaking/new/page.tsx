@@ -14,11 +14,11 @@ export const metadata: Metadata = { title: "New conversation" };
 export default async function NewConversation({ searchParams }: { searchParams: Promise<{ scenario?: string }> }) {
   const s = getScenario((await searchParams).scenario ?? "");
   if (!s) notFound();
-  const p = getProfile();
+  const p = await getProfile();
   const ai = aiStatus();
   // Adaptive: fluency for free conversation and discussion, the scenario's own default otherwise.
   const mode = p.correctionStyle === "adaptive" ? (s.category === "free" ? "fluency" : s.defaultCorrection) : p.correctionStyle;
-  const recycled = recyclableExpressions(2);
+  const recycled = await recyclableExpressions(2);
   return (
     <div className="page page-narrow">
       <PageHeader breadcrumbs={[{ href: "/speaking", label: "Speaking Studio" }]} eyebrow="Conversation" title={s.title} lede={s.summary} />

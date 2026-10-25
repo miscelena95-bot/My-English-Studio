@@ -5,8 +5,8 @@ import { PageHeader } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Welcome" };
 
-export default function WelcomePage() {
-  const p = getProfile();
+export default async function WelcomePage() {
+  const p = await getProfile();
   return (
     <div className="page page-narrow">
       <PageHeader

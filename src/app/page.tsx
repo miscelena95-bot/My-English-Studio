@@ -14,17 +14,17 @@ import { CATEGORY_LABELS as SCENARIO_CATEGORIES } from "@/content/speaking/scena
 
 const SKILL_LABEL: Record<string, string> = { speaking: "Speaking", writing: "Writing", grammar: "Grammar", vocabulary: "Vocabulary", reading: "Reading", listening: "Listening" };
 
-export default function Home() {
-  const d = dashboardData();
+export default async function Home() {
+  const d = await dashboardData();
   if (!isOnboarded(d.profile)) redirect("/welcome");
   const ai = aiStatus();
-  const today = todaySession();
-  const status = today ? sessionStatus(today) : null;
-  const plan = status?.plan ?? buildPlan();
+  const today = await todaySession();
+  const status = today ? await sessionStatus(today) : null;
+  const plan = status?.plan ?? await buildPlan();
   const doneCount = status ? status.done.filter(Boolean).length : 0;
   const activeConversation = d.recentSpeaking.find((s) => s.status === "active" && s.learnerTurns > 0);
-  const unfinished = unfinishedActivity();
-  const draft = listSubmissions().find((s) => s.status === "draft" && (s.latest?.wordCount ?? 0) > 0);
+  const unfinished = await unfinishedActivity();
+  const draft = (await listSubmissions()).find((s) => s.status === "draft" && (s.latest?.wordCount ?? 0) > 0);
   const name = d.profile.name ? `, ${d.profile.name}` : "";
   const level = d.profile.estimatedLevel ?? d.profile.selfAssessedLevel;
   const onBreak = d.profile.breakUntil && d.profile.breakUntil >= new Date().toISOString().slice(0, 10);

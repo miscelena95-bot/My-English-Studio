@@ -12,9 +12,9 @@ export const metadata: Metadata = { title: "Writing Workshop" };
 
 const STATUS: Record<string, string> = { draft: "Draft", feedback: "Feedback received", revised: "Revised" };
 
-export default function WritingPage() {
-  const subs = listSubmissions();
-  const writingMistakes = listMistakes().filter((m) => m.source === "writing" && m.status !== "resolved");
+export default async function WritingPage() {
+  const subs = await listSubmissions();
+  const writingMistakes = (await listMistakes()).filter((m) => m.source === "writing" && m.status !== "resolved");
   const byCat = new Map<string, number>();
   for (const m of writingMistakes) byCat.set(m.category, (byCat.get(m.category) ?? 0) + m.occurrences);
   const cats = Object.keys(CATEGORY_LABELS) as WritingCategory[];

@@ -12,9 +12,9 @@ import { markUsedExpressions } from "./vocabulary";
 
 /** Ask the tutor to check an "unverified" open answer; the attempt is settled with the verdict. */
 export async function checkAttemptWithTutor(attemptId: number, mistakeId?: number | null) {
-  const a = getDb().select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get();
+  const a = await getDb().select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get();
   if (!a) throw new Error("Attempt not found");
-  const r = resolveExercise(a.exerciseId);
+  const r = await resolveExercise(a.exerciseId);
   if (!r) throw new Error("Exercise not found");
   const ex = r.exercise;
   const ai = requireAI();
@@ -33,8 +33,8 @@ export async function checkAttemptWithTutor(attemptId: number, mistakeId?: numbe
     .join("\n");
   const check = await ai.generate({ task: "answer-check", system: answerCheckSystemPrompt(), messages: [{ role: "user", content: details }], schema: AnswerCheck, maxTokens: 1500, effort: "low" });
   const accepted = check.verdict !== "incorrect";
-  settleAttempt(attemptId, accepted, { mistakeId, via: "tutor", corrected: check.corrected ?? undefined });
-  if (ex.type === "produce") markUsedExpressions(a.response);
+  await settleAttempt(attemptId, accepted, { mistakeId, via: "tutor", corrected: check.corrected ?? undefined });
+  if (ex.type === "produce") await markUsedExpressions(a.response);
   return check;
 }
 
@@ -51,11 +51,11 @@ export async function productionFeedback(input: { context: string; prompt: strin
   ]
     .filter(Boolean)
     .join("\n");
-  const raw = await ai.generate({ task: "production-feedback", system: productionSystemPrompt(buildLearnerContext()), messages: [{ role: "user", content: msg }], schema: ProductionFeedback, maxTokens: 4000, effort: "low" });
+  const raw = await ai.generate({ task: "production-feedback", system: productionSystemPrompt(await buildLearnerContext()), messages: [{ role: "user", content: msg }], schema: ProductionFeedback, maxTokens: 4000, effort: "low" });
   const fb = { ...raw, corrections: validateCorrections(raw.corrections, input.text, 5), estimatedBand: input.askBand ? raw.estimatedBand : null };
   for (const c of fb.corrections) {
     if (c.kind === "style") continue;
-    logMistake({ original: c.original, corrected: c.corrected, explanation: c.explanation, category: c.category, severity: c.kind, source: input.source, sourceRef: input.sourceRef, context: input.context });
+    await logMistake({ original: c.original, corrected: c.corrected, explanation: c.explanation, category: c.category, severity: c.kind, source: input.source, sourceRef: input.sourceRef, context: input.context });
   }
   return fb;
 }

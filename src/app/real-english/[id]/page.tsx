@@ -16,9 +16,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function UnitPage({ params }: { params: Promise<{ id: string }> }) {
   const unit = getUnit((await params).id);
   if (!unit) notFound();
-  const p = getProfile();
-  const prog = getDb().select().from(schema.contentProgress).where(eq(schema.contentProgress.contentId, unit.id)).get();
-  const saved = listCollection().map((e) => e.libraryId).filter(Boolean) as string[];
+  const p = await getProfile();
+  const prog = await getDb().select().from(schema.contentProgress).where(eq(schema.contentProgress.contentId, unit.id)).get();
+  const saved = (await listCollection()).map((e) => e.libraryId).filter(Boolean) as string[];
   return (
     <div className="page page-narrow">
       <PageHeader breadcrumbs={[{ href: "/real-english", label: "Real English" }]} eyebrow={`${CATEGORY_INFO[unit.category].label} · ${unit.skill} · ${unit.minutes} min`} title={unit.title} lede={unit.objective} />

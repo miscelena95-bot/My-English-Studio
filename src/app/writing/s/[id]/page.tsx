@@ -16,7 +16,7 @@ import { IconCheck, IconX } from "@/components/ui/icons";
 export const metadata: Metadata = { title: "Writing" };
 
 export default async function SubmissionPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ v?: string; compare?: string }> }) {
-  const data = getSubmission(Number((await params).id));
+  const data = await getSubmission(Number((await params).id));
   if (!data) notFound();
   const sp = await searchParams;
   const { submission, drafts, task } = data;

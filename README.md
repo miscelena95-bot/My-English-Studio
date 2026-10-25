@@ -16,13 +16,41 @@ cp .env.example .env.local     # optional: add ANTHROPIC_API_KEY for the AI tuto
 npm run dev                    # http://localhost:3000
 ```
 
-Requirements: Node.js 20+ (tested on 22). The SQLite database is created automatically at `./data/studio.db` and migrations run on start-up.
+Requirements: Node.js 20.18+ (tested on 22). Locally the database is a SQLite file created automatically at `./data/studio.db`; migrations run on start-up.
 
-Production:
+Production on your own server:
 
 ```bash
 npm run build && npm start
 ```
+
+## Deploy to Vercel
+
+Vercel has no persistent disk, so the app uses a hosted [Turso](https://turso.tech) (libSQL) database there. It's the same SQLite schema, so nothing else changes.
+
+1. **Create a Turso database** (free tier). With the [Turso CLI](https://docs.turso.tech/cli/introduction):
+   ```bash
+   turso db create my-english-studio
+   turso db show my-english-studio --url      # → DATABASE_URL (libsql://…)
+   turso db tokens create my-english-studio   # → DATABASE_AUTH_TOKEN
+   ```
+   Or create it in the Turso dashboard and copy the URL and a token.
+2. **Import the GitHub repository** in Vercel (*Add New → Project*). The framework is detected as Next.js; keep the default build settings. The `vercel-build` script runs the database migrations, then `next build`.
+3. **Set environment variables** in *Project → Settings → Environment Variables* (Production, and Preview if you use it):
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | the `libsql://…` URL |
+   | `DATABASE_AUTH_TOKEN` | the Turso token |
+   | `STUDIO_PASSCODE` | a passcode of your choice — **required** (see below) |
+   | `ANTHROPIC_API_KEY` | optional, enables the AI tutor |
+   | `GUARDIAN_API_KEY` | optional, enables news |
+4. **Deploy.** Open the URL; the browser asks for the passcode (any username).
+
+Safety defaults on Vercel:
+- Without `DATABASE_URL` the build fails with a clear message, instead of silently storing data on a disk that disappears.
+- Without `STUDIO_PASSCODE` the deployment answers with a "locked" message instead of exposing your learning data and AI credits to anyone with the URL. Set `STUDIO_PUBLIC=1` only if you really want it public.
+- AI calls are capped at 2 × 60 s, inside Vercel's default 300 s function limit with Fluid compute (on by default for new projects). If you've turned Fluid compute off on the Hobby plan, AI requests will time out at 10 s — turn it back on.
+- Preview deployments share the same database if you give them the same `DATABASE_URL`. Use a separate Turso database for previews if you want to keep your real progress clean.
 
 ## What works without any API key
 
@@ -53,9 +81,11 @@ All configuration is via environment variables (see `.env.example`). Secrets are
 | `AI_BASE_URL` | Optional override of the API base URL (used by the tests). |
 | `HTTPS_PROXY` / `NO_PROXY` | Respected by `npm run check:links` (exit 0 = all OK, 1 = a broken link, 2 = some links unreachable from this network). |
 | `GUARDIAN_API_KEY` | Optional. Free developer key from <https://open-platform.theguardian.com/access/> for recent news. |
-| `DATABASE_PATH` | SQLite file location. Default `./data/studio.db`. |
+| `DATABASE_URL` / `DATABASE_AUTH_TOKEN` | Hosted libSQL/Turso database (required on Vercel). Takes precedence over `DATABASE_PATH`. Migrated by `npm run db:migrate` / at build. |
+| `DATABASE_PATH` | Local SQLite file. Default `./data/studio.db`. Migrated automatically at start-up. |
 | `STUDIO_TIMEZONE` | Default `Europe/Rome`. Used for "today", weeks and streaks. |
-| `STUDIO_PASSCODE` | If set, the whole app requires this passcode (HTTP Basic auth, any username). **Set it if you deploy publicly.** |
+| `STUDIO_PASSCODE` | If set, the whole app requires this passcode (HTTP Basic auth, any username). **Required on Vercel.** |
+| `STUDIO_PUBLIC` | Set to `1` to deliberately run a Vercel deployment without a passcode. |
 
 Settings → *AI tutor*, *Voice* and *News* show the live status of each integration.
 
@@ -87,7 +117,7 @@ src/
 
 Key decisions:
 
-- **Next.js 16 + TypeScript + SQLite (better-sqlite3) via Drizzle.** One process, one file database, no external infrastructure — appropriate for a single-learner app; the schema is keyed so a `learner_id` could be added later.
+- **Next.js 16 + TypeScript + SQLite via Drizzle and libSQL.** Locally a single file database with no external infrastructure; in production the same schema on Turso. All data access is async; a type-aware lint rule (`no-floating-promises`) fails the build on any un-awaited query, so writes can't be silently dropped. Child rows are deleted explicitly rather than relying on database cascade settings. The schema is keyed so a `learner_id` could be added later.
 - **Deterministic grading on the server.** Objective exercises never call an AI. The server re-grades every answer from the exercise id (the client can't fake results). Accepted variants: contractions, curly quotes, punctuation, case, listed alternatives, and genuine one-letter typos — but never a grammatical ending (*announce/announced*).
 - **Open answers are never auto-rejected.** If an answer differs from the model but contains the required structure, it is "unverified": the learner compares and decides, or asks the tutor.
 - **AI behind an interface** (`src/lib/ai/provider.ts`). Calls use structured outputs validated with Zod, then a second validation step (`validate.ts`) drops corrections that don't quote the learner's actual words, normalises categories and caps list sizes. Errors map to clear, non-technical messages.
@@ -101,7 +131,7 @@ Key decisions:
 ```bash
 npm run typecheck
 npm run lint
-npm test            # 109 unit/integration tests (Vitest)
+npm test            # 115 unit/integration tests (Vitest)
 npm run test:e2e    # production build + 18 Playwright tests
 npm run check:links # verify external content links (needs normal internet access)
 ```
@@ -131,4 +161,5 @@ The AI end-to-end tests use `e2e/mock-anthropic.mjs`, a test double that returns
 - Voice input depends on browser support (not Firefox) and, in Chrome/Edge, on an internet connection to the browser's speech service. Microphone flows were not testable in the headless test browser.
 - Level estimates are informal and conservative: the short diagnostic never suggests C1, and later suggestions require substantial evidence.
 - Single learner, no accounts. Use `STUDIO_PASSCODE` (or a proper auth layer) for any public deployment.
+- The Vercel/Turso setup was verified locally with the same libSQL driver (file and in-memory databases) and a production build, but not against a live Turso database or an actual Vercel deployment — no accounts were available in the build environment. The first deploy is the real test; the build log shows the migration step's result.
 - Only the Anthropic provider is implemented; adding another means implementing `AIProvider` in `src/lib/ai`.

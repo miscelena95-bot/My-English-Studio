@@ -11,9 +11,9 @@ export const metadata: Metadata = { title: "Expression" };
 const SOURCE: Record<string, string> = { seed: "Vocabulary Lab", manual: "added by you", speaking: "a speaking session", writing: "writing feedback", "real-english": "Real English", grammar: "Grammar Lab", mistakes: "your mistakes" };
 
 export default async function EntryPage({ params }: { params: Promise<{ id: string }> }) {
-  const e = getEntry(Number((await params).id));
+  const e = await getEntry(Number((await params).id));
   if (!e) notFound();
-  const logs = reviewHistory(e.id);
+  const logs = await reviewHistory(e.id);
   const s = e.schedule;
   return (
     <div className="page page-narrow">

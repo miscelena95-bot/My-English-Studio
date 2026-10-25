@@ -15,7 +15,16 @@ function safeEqual(a: string, b: string) {
 
 export function proxy(request: NextRequest) {
   const pass = process.env.STUDIO_PASSCODE?.trim();
-  if (!pass) return NextResponse.next();
+  if (!pass) {
+    // Secure by default on Vercel: a public deployment without a passcode would expose
+    // personal learning data and let anyone spend the AI credits.
+    if (process.env.VERCEL && process.env.STUDIO_PUBLIC !== "1")
+      return new NextResponse(
+        "My English Studio is deployed but locked: set STUDIO_PASSCODE in the Vercel project's environment variables and redeploy (or set STUDIO_PUBLIC=1 to make it public on purpose).",
+        { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } },
+      );
+    return NextResponse.next();
+  }
   const header = request.headers.get("authorization") ?? "";
   if (header.startsWith("Basic ")) {
     try {

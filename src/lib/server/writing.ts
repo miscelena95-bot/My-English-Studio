@@ -16,50 +16,50 @@ export type Submission = typeof schema.writingSubmissions.$inferSelect;
 export type Draft = typeof schema.writingDrafts.$inferSelect;
 export const MAX_WRITING_CHARS = 6000;
 
-export function createSubmission(taskId: string) {
+export async function createSubmission(taskId: string) {
   const task = getWritingTask(taskId);
   if (!task) throw new Error("Unknown writing task");
   const db = getDb();
-  const sub = db.insert(schema.writingSubmissions).values({ taskId, title: task.title }).returning().get();
-  db.insert(schema.writingDrafts).values({ submissionId: sub.id, version: 1, text: "", wordCount: 0 }).run();
+  const sub = await db.insert(schema.writingSubmissions).values({ taskId, title: task.title }).returning().get();
+  await db.insert(schema.writingDrafts).values({ submissionId: sub.id, version: 1, text: "", wordCount: 0 }).run();
   return sub;
 }
 
-export function getSubmission(id: number) {
+export async function getSubmission(id: number) {
   const db = getDb();
-  const sub = db.select().from(schema.writingSubmissions).where(eq(schema.writingSubmissions.id, id)).get();
+  const sub = await db.select().from(schema.writingSubmissions).where(eq(schema.writingSubmissions.id, id)).get();
   if (!sub) return undefined;
-  const drafts = db.select().from(schema.writingDrafts).where(eq(schema.writingDrafts.submissionId, id)).orderBy(asc(schema.writingDrafts.version)).all();
+  const drafts = await db.select().from(schema.writingDrafts).where(eq(schema.writingDrafts.submissionId, id)).orderBy(asc(schema.writingDrafts.version)).all();
   return { submission: sub, drafts, task: getWritingTask(sub.taskId) as WritingTask };
 }
 
-export function listSubmissions() {
+export async function listSubmissions() {
   const db = getDb();
-  const subs = db.select().from(schema.writingSubmissions).orderBy(desc(schema.writingSubmissions.updatedAt)).all();
-  return subs.map((s) => {
-    const drafts = db.select().from(schema.writingDrafts).where(eq(schema.writingDrafts.submissionId, s.id)).orderBy(desc(schema.writingDrafts.version)).all();
+  const subs = await db.select().from(schema.writingSubmissions).orderBy(desc(schema.writingSubmissions.updatedAt)).all();
+  return Promise.all(subs.map(async (s) => {
+    const drafts = await db.select().from(schema.writingDrafts).where(eq(schema.writingDrafts.submissionId, s.id)).orderBy(desc(schema.writingDrafts.version)).all();
     return { ...s, latest: drafts[0], versions: drafts.length };
-  });
+  }));
 }
 
-function currentDraft(id: number) {
-  const data = getSubmission(id);
+async function currentDraft(id: number) {
+  const data = await getSubmission(id);
   if (!data) throw new Error("Submission not found");
   return { ...data, current: data.drafts[data.drafts.length - 1] };
 }
 
 /** Autosave: updates the latest draft while it has no feedback yet. */
-export function saveDraft(submissionId: number, text: string) {
-  const { current } = currentDraft(submissionId);
+export async function saveDraft(submissionId: number, text: string) {
+  const { current } = await currentDraft(submissionId);
   const clean = text.slice(0, MAX_WRITING_CHARS);
   if (current.feedbackSource) throw new Error("This draft already has feedback. Start a revision to keep editing.");
   const db = getDb();
-  db.update(schema.writingDrafts).set({ text: clean, wordCount: wordCount(clean) }).where(eq(schema.writingDrafts.id, current.id)).run();
-  db.update(schema.writingSubmissions).set({ updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
+  await db.update(schema.writingDrafts).set({ text: clean, wordCount: wordCount(clean) }).where(eq(schema.writingDrafts.id, current.id)).run();
+  await db.update(schema.writingSubmissions).set({ updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
 }
 
-export function startRevision(submissionId: number) {
-  const { current } = currentDraft(submissionId);
+export async function startRevision(submissionId: number) {
+  const { current } = await currentDraft(submissionId);
   if (!current.feedbackSource) return current;
   return getDb()
     .insert(schema.writingDrafts)
@@ -68,15 +68,15 @@ export function startRevision(submissionId: number) {
     .get();
 }
 
-function recordWritingActivity(sub: Submission, task: WritingTask, draft: Draft, seconds?: number) {
-  const id = startActivity({ kind: "writing", skill: "writing", refId: task.id, title: task.title, meta: { submissionId: sub.id, version: draft.version, words: draft.wordCount } });
-  completeActivity(id, { durationSec: seconds ?? Math.min(1800, draft.wordCount * 6), itemsTotal: 1, itemsCorrect: 0 });
+async function recordWritingActivity(sub: Submission, task: WritingTask, draft: Draft, seconds?: number) {
+  const id = await startActivity({ kind: "writing", skill: "writing", refId: task.id, title: task.title, meta: { submissionId: sub.id, version: draft.version, words: draft.wordCount } });
+  await completeActivity(id, { durationSec: seconds ?? Math.min(1800, draft.wordCount * 6), itemsTotal: 1, itemsCorrect: 0 });
   return id;
 }
 
 /** AI feedback on the current draft, compared with the previous one when there is one. */
 export async function requestAIFeedback(submissionId: number, opts: { seconds?: number } = {}) {
-  const data = currentDraft(submissionId);
+  const data = await currentDraft(submissionId);
   const { current, drafts, task, submission } = data;
   if (wordCount(current.text) < 20) throw new Error("Write at least 20 words before asking for feedback.");
   const previous = drafts.length > 1 ? drafts[drafts.length - 2] : null;
@@ -94,31 +94,33 @@ export async function requestAIFeedback(submissionId: number, opts: { seconds?: 
   ]
     .filter(Boolean)
     .join("\n");
-  const raw = await ai.generate({ task: "writing-feedback", system: writingSystemPrompt(buildLearnerContext()), messages: [{ role: "user", content: prompt }], schema: WritingFeedback, maxTokens: 8000, effort: "medium" });
+  const raw = await ai.generate({ task: "writing-feedback", system: writingSystemPrompt(await buildLearnerContext()), messages: [{ role: "user", content: prompt }], schema: WritingFeedback, maxTokens: 8000, effort: "medium" });
   const feedback = validateWritingFeedback(raw, current.text);
   const db = getDb();
-  db.update(schema.writingDrafts).set({ feedback, feedbackSource: "ai" }).where(eq(schema.writingDrafts.id, current.id)).run();
-  db.update(schema.writingSubmissions).set({ status: drafts.length > 1 ? "revised" : "feedback", updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
+  await db.update(schema.writingDrafts).set({ feedback, feedbackSource: "ai" }).where(eq(schema.writingDrafts.id, current.id)).run();
+  await db.update(schema.writingSubmissions).set({ status: drafts.length > 1 ? "revised" : "feedback", updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
   for (const a of feedback.annotations) {
     if (a.kind === "style") continue;
-    logMistake({ original: a.original, corrected: a.corrected, explanation: a.explanation, category: a.category, severity: a.kind, source: "writing", sourceRef: `submission:${submissionId}`, context: task.title });
+    await logMistake({ original: a.original, corrected: a.corrected, explanation: a.explanation, category: a.category, severity: a.kind, source: "writing", sourceRef: `submission:${submissionId}`, context: task.title });
   }
-  markUsedExpressions(current.text);
-  recordWritingActivity(submission, task, current, opts.seconds);
+  await markUsedExpressions(current.text);
+  await recordWritingActivity(submission, task, current, opts.seconds);
   return feedback;
 }
 
 /** Without AI: structured self-review against the task checklist (clearly labelled in the UI). */
-export function submitSelfReview(submissionId: number, checks: Record<string, boolean>, opts: { seconds?: number } = {}) {
-  const { current, task, submission, drafts } = currentDraft(submissionId);
+export async function submitSelfReview(submissionId: number, checks: Record<string, boolean>, opts: { seconds?: number } = {}) {
+  const { current, task, submission, drafts } = await currentDraft(submissionId);
   if (wordCount(current.text) < 20) throw new Error("Write at least 20 words before reviewing.");
   const db = getDb();
-  db.update(schema.writingDrafts).set({ selfReview: checks, feedbackSource: "checklist" }).where(eq(schema.writingDrafts.id, current.id)).run();
-  db.update(schema.writingSubmissions).set({ status: drafts.length > 1 ? "revised" : "feedback", updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
-  markUsedExpressions(current.text);
-  recordWritingActivity(submission, task, current, opts.seconds);
+  await db.update(schema.writingDrafts).set({ selfReview: checks, feedbackSource: "checklist" }).where(eq(schema.writingDrafts.id, current.id)).run();
+  await db.update(schema.writingSubmissions).set({ status: drafts.length > 1 ? "revised" : "feedback", updatedAt: new Date() }).where(eq(schema.writingSubmissions.id, submissionId)).run();
+  await markUsedExpressions(current.text);
+  await recordWritingActivity(submission, task, current, opts.seconds);
 }
 
-export function deleteSubmission(id: number) {
-  getDb().delete(schema.writingSubmissions).where(eq(schema.writingSubmissions.id, id)).run();
+export async function deleteSubmission(id: number) {
+  // Explicit child deletes: don't depend on the database's cascade settings.
+  await getDb().delete(schema.writingDrafts).where(eq(schema.writingDrafts.submissionId, id)).run();
+  await getDb().delete(schema.writingSubmissions).where(eq(schema.writingSubmissions.id, id)).run();
 }

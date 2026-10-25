@@ -12,7 +12,7 @@ import { IconExternal } from "@/components/ui/icons";
 export const metadata: Metadata = { title: "Resource" };
 
 export default async function ResourcePage({ params }: { params: Promise<{ id: string }> }) {
-  const r = getDb().select().from(schema.contentResources).where(eq(schema.contentResources.id, Number((await params).id))).get();
+  const r = await getDb().select().from(schema.contentResources).where(eq(schema.contentResources.id, Number((await params).id))).get();
   if (!r) notFound();
   const ai = aiStatus().configured;
   const isNews = r.kind.startsWith("news:");

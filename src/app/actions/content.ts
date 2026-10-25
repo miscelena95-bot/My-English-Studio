@@ -16,14 +16,14 @@ import { wordCount } from "@/lib/domain/text";
 import { run } from "./result";
 
 export async function saveUnitStep(unitId: string, step: string, answer?: string) {
-  return run(() => {
+  return run(async () => {
     if (!getUnit(unitId)) throw new Error("Unknown unit");
     const db = getDb();
-    const p = db.select().from(schema.contentProgress).where(eq(schema.contentProgress.contentId, unitId)).get();
+    const p = await db.select().from(schema.contentProgress).where(eq(schema.contentProgress.contentId, unitId)).get();
     if (!p) {
-      db.insert(schema.contentProgress).values({ contentId: unitId, startedAt: new Date(), stepsDone: [step], answers: answer ? { [step]: answer } : {} }).run();
+      await db.insert(schema.contentProgress).values({ contentId: unitId, startedAt: new Date(), stepsDone: [step], answers: answer ? { [step]: answer } : {} }).run();
     } else {
-      db.update(schema.contentProgress)
+      await db.update(schema.contentProgress)
         .set({ stepsDone: Array.from(new Set([...p.stepsDone, step])), answers: answer ? { ...p.answers, [step]: answer.slice(0, 3000) } : p.answers })
         .where(eq(schema.contentProgress.contentId, unitId))
         .run();
@@ -39,10 +39,10 @@ export async function submitUnitProduction(unitId: string, text: string, withFee
     const clean = text.trim().slice(0, 4000);
     if (wordCount(clean) < 15) throw new Error("Write or say at least 15 words.");
     const db = getDb();
-    db.update(schema.contentProgress).set({ completedAt: new Date() }).where(eq(schema.contentProgress.contentId, unitId)).run();
-    const act = startActivity({ kind: "real-english", skill: unit.skill, refId: unit.id, title: unit.title });
-    completeActivity(act, { durationSec: seconds, itemsTotal: 1, meta: { inputMode } });
-    const used = markUsedExpressions(clean).map((u) => u.phrase);
+    await db.update(schema.contentProgress).set({ completedAt: new Date() }).where(eq(schema.contentProgress.contentId, unitId)).run();
+    const act = await startActivity({ kind: "real-english", skill: unit.skill, refId: unit.id, title: unit.title });
+    await completeActivity(act, { durationSec: seconds, itemsTotal: 1, meta: { inputMode } });
+    const used = (await markUsedExpressions(clean)).map((u) => u.phrase);
     const feedback =
       withFeedback && aiStatus().configured
         ? await productionFeedback({ context: `Real English unit “${unit.title}”. Objective: ${unit.objective}`, prompt: unit.production.prompt, targets: unit.production.targets, text: clean, source: "real-english", sourceRef: unit.id, inputMode })
@@ -67,17 +67,17 @@ const ResourceSchema = z.object({
 
 /** Learner-added resources (articles, podcasts, videos). Text pasted by the learner is used to build an activity. */
 export async function addResource(input: unknown) {
-  return run(() => {
+  return run(async () => {
     const r = ResourceSchema.parse(input);
-    const row = getDb().insert(schema.contentResources).values({ kind: r.kind, title: r.title, url: r.url, learnerNotes: r.notes }).returning().get();
+    const row = await getDb().insert(schema.contentResources).values({ kind: r.kind, title: r.title, url: r.url, learnerNotes: r.notes }).returning().get();
     revalidatePath("/real-english");
     return row.id;
   });
 }
 
 export async function deleteResource(id: number) {
-  return run(() => {
-    getDb().delete(schema.contentResources).where(eq(schema.contentResources.id, id)).run();
+  return run(async () => {
+    await getDb().delete(schema.contentResources).where(eq(schema.contentResources.id, id)).run();
     revalidatePath("/real-english");
     return true;
   });
@@ -87,7 +87,7 @@ export async function deleteResource(id: number) {
 export async function generateActivityForResource(id: number) {
   return run(async () => {
     const db = getDb();
-    const r = db.select().from(schema.contentResources).where(eq(schema.contentResources.id, id)).get();
+    const r = await db.select().from(schema.contentResources).where(eq(schema.contentResources.id, id)).get();
     if (!r) throw new Error("Resource not found");
     const text = [r.summary, r.sourceText, r.learnerNotes].filter(Boolean).join("\n\n");
     if (wordCount(text) < 25) throw new Error("Paste at least a paragraph of text (or your own notes about it) so the activity is based on real content.");
@@ -101,7 +101,7 @@ export async function generateActivityForResource(id: number) {
       effort: "low",
     });
     const activity = validateContentActivity(raw);
-    db.update(schema.contentResources).set({ generatedActivity: activity }).where(eq(schema.contentResources.id, id)).run();
+    await db.update(schema.contentResources).set({ generatedActivity: activity }).where(eq(schema.contentResources.id, id)).run();
     revalidatePath(`/real-english/resources/${id}`);
     return activity;
   });
@@ -110,13 +110,13 @@ export async function generateActivityForResource(id: number) {
 export async function completeResourceActivity(id: number, text: string, seconds: number, withFeedback: boolean) {
   return run(async () => {
     const db = getDb();
-    const r = db.select().from(schema.contentResources).where(eq(schema.contentResources.id, id)).get();
+    const r = await db.select().from(schema.contentResources).where(eq(schema.contentResources.id, id)).get();
     if (!r) throw new Error("Resource not found");
     const clean = text.trim().slice(0, 4000);
     if (wordCount(clean) < 15) throw new Error("Write at least 15 words.");
-    const act = startActivity({ kind: "real-english", skill: "reading", refId: `resource:${id}`, title: r.title });
-    completeActivity(act, { durationSec: seconds, itemsTotal: 1 });
-    const used = markUsedExpressions(clean).map((u) => u.phrase);
+    const act = await startActivity({ kind: "real-english", skill: "reading", refId: `resource:${id}`, title: r.title });
+    await completeActivity(act, { durationSec: seconds, itemsTotal: 1 });
+    const used = (await markUsedExpressions(clean)).map((u) => u.phrase);
     const activity = r.generatedActivity as { productionTask?: string } | null;
     const feedback =
       withFeedback && aiStatus().configured

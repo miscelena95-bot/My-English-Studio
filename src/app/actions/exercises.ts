@@ -18,30 +18,30 @@ const ResponseSchema = z.discriminatedUnion("kind", [
 ]);
 
 export async function startExerciseActivity(input: { kind: ActivityKind; skill: Skill; refId: string | null; title: string }) {
-  return run(() => startActivity(input));
+  return run(async () => await startActivity(input));
 }
 
 export async function submitExerciseAnswer(input: { exerciseId: string; response: unknown; activityId?: number | null; mistakeId?: number | null }) {
-  return run(() => {
+  return run(async () => {
     const response = ResponseSchema.parse(input.response);
-    return submitAnswer({ exerciseId: String(input.exerciseId), response, activityId: input.activityId ?? null, mistakeId: input.mistakeId ?? null });
+    return await submitAnswer({ exerciseId: String(input.exerciseId), response, activityId: input.activityId ?? null, mistakeId: input.mistakeId ?? null });
   });
 }
 
 export async function settleUnverified(attemptId: number, accepted: boolean, mistakeId?: number | null) {
-  return run(() => {
-    const a = settleAttempt(attemptId, accepted, { mistakeId, via: "self" });
+  return run(async () => {
+    const a = await settleAttempt(attemptId, accepted, { mistakeId, via: "self" });
     return { status: a.status };
   });
 }
 
 export async function checkWithTutor(attemptId: number, mistakeId?: number | null) {
-  return run(() => checkAttemptWithTutor(attemptId, mistakeId));
+  return run(async () => checkAttemptWithTutor(attemptId, mistakeId));
 }
 
 export async function finishActivity(activityId: number, durationSec: number, meta?: Record<string, unknown>) {
-  return run(() => {
-    const a = completeActivity(activityId, { durationSec: Math.max(0, Math.round(durationSec)), meta });
+  return run(async () => {
+    const a = await completeActivity(activityId, { durationSec: Math.max(0, Math.round(durationSec)), meta });
     revalidatePath("/", "layout");
     return { itemsTotal: a.itemsTotal, itemsCorrect: a.itemsCorrect, durationSec: a.durationSec };
   });
@@ -49,11 +49,11 @@ export async function finishActivity(activityId: number, durationSec: number, me
 
 /** Spaced-repetition update after a review item. The learner may override the automatic rating. */
 export async function reviewVocab(input: { vocabId: number; exerciseId: string; status: "correct" | "close" | "incorrect" | "unverified"; override?: Rating }) {
-  return run(() => {
+  return run(async () => {
     const parsed = parseVocabExerciseId(input.exerciseId);
     if (!parsed) throw new Error("Not a vocabulary review item");
     const rating = input.override ?? ratingFromResult(input.status);
-    const next = recordReview(input.vocabId, { rating, mode: reviewModeOf(parsed.mode), exerciseType: parsed.mode, difficulty: parsed.mode === "produce" ? 3 : parsed.mode === "recall" ? 3 : parsed.mode === "gap" ? 2 : 1 });
+    const next = await recordReview(input.vocabId, { rating, mode: reviewModeOf(parsed.mode), exerciseType: parsed.mode, difficulty: parsed.mode === "produce" ? 3 : parsed.mode === "recall" ? 3 : parsed.mode === "gap" ? 2 : 1 });
     return { rating, intervalDays: next.intervalDays, mastery: next.mastery, dueAt: next.dueAt.toISOString() };
   });
 }

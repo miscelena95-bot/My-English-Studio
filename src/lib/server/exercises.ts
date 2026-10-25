@@ -33,7 +33,7 @@ export function mistakeFixExercise(m: { id: number; original: string; corrected:
   };
 }
 
-export function resolveExercise(id: string): ResolvedExercise | undefined {
+export async function resolveExercise(id: string): Promise<ResolvedExercise | undefined> {
   const s = staticExercise(id);
   if (s) return s;
 
@@ -41,7 +41,7 @@ export function resolveExercise(id: string): ResolvedExercise | undefined {
   if (v) {
     let like;
     if (v.key.startsWith("db")) {
-      const e = getEntry(Number(v.key.slice(2)));
+      const e = await getEntry(Number(v.key.slice(2)));
       if (!e) return undefined;
       like = toVocabLike(e);
     } else {
@@ -62,7 +62,7 @@ export function resolveExercise(id: string): ResolvedExercise | undefined {
 
   const m = id.match(/^m:fix:(\d+)$/);
   if (m) {
-    const mistake = getMistake(Number(m[1]));
+    const mistake = await getMistake(Number(m[1]));
     if (!mistake) return undefined;
     return { exercise: mistakeFixExercise(mistake), skill: "grammar", topicId: "mistakes", loggable: false };
   }
@@ -92,8 +92,8 @@ export interface SubmitInput {
   mistakeId?: number | null;
 }
 
-export function submitAnswer(input: SubmitInput) {
-  const resolved = resolveExercise(input.exerciseId);
+export async function submitAnswer(input: SubmitInput) {
+  const resolved = await resolveExercise(input.exerciseId);
   if (!resolved) throw new Error("This exercise no longer exists. Please reload the page.");
   const { exercise, skill, topicId, loggable } = resolved;
   const grade = gradeExercise(exercise, input.response);
@@ -108,7 +108,7 @@ export function submitAnswer(input: SubmitInput) {
           ? input.response.sequence.join(" ")
           : input.response.rightForLeft.join(" | ");
 
-  const attempt = getDb()
+  const attempt = await getDb()
     .insert(schema.exerciseAttempts)
     .values({
       activityId: input.activityId ?? null,
@@ -126,11 +126,11 @@ export function submitAnswer(input: SubmitInput) {
 
   let mistakeLogged: { id: number; repeated: boolean } | null = null;
   if (input.mistakeId) {
-    if (grade.isCorrect !== null) recordMistakePractice(input.mistakeId, grade.isCorrect, responseText);
+    if (grade.isCorrect !== null) await recordMistakePractice(input.mistakeId, grade.isCorrect, responseText);
   } else if (loggable) {
     const pair = mistakePair(exercise, input.response, grade);
     if (pair)
-      mistakeLogged = logMistake({
+      mistakeLogged = await logMistake({
         ...pair,
         explanation: exercise.explanation,
         category: exercise.category,
@@ -148,22 +148,23 @@ export function submitAnswer(input: SubmitInput) {
  * The learner decides an "unverified" answer after comparing with the model
  * answers (or after the tutor checked it). Rejected answers go to the tracker.
  */
-export function settleAttempt(attemptId: number, accepted: boolean, opts: { mistakeId?: number | null; via?: "self" | "tutor"; corrected?: string } = {}) {
+export async function settleAttempt(attemptId: number, accepted: boolean, opts: { mistakeId?: number | null; via?: "self" | "tutor"; corrected?: string } = {}) {
   const db = getDb();
-  const a = db.select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get();
+  const a = await db.select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get();
   if (!a) throw new Error("Attempt not found");
   if (a.status !== "unverified") return a;
-  db.update(schema.exerciseAttempts)
+  await db
+    .update(schema.exerciseAttempts)
     .set({ status: accepted ? (opts.via === "tutor" ? "correct" : "self-accepted") : "incorrect", isCorrect: accepted })
     .where(eq(schema.exerciseAttempts.id, attemptId))
     .run();
-  if (opts.mistakeId) recordMistakePractice(opts.mistakeId, accepted, a.response);
+  if (opts.mistakeId) await recordMistakePractice(opts.mistakeId, accepted, a.response);
   else if (!accepted) {
-    const r = resolveExercise(a.exerciseId);
+    const r = await resolveExercise(a.exerciseId);
     if (r?.loggable && r.exercise.type !== "produce" && r.exercise.type !== "match") {
       const corrected = opts.corrected ?? ("answers" in r.exercise ? r.exercise.answers[0] : undefined);
       if (corrected)
-        logMistake({
+        await logMistake({
           original: a.response,
           corrected,
           explanation: r.exercise.explanation,
@@ -175,5 +176,5 @@ export function settleAttempt(attemptId: number, accepted: boolean, opts: { mist
         });
     }
   }
-  return db.select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get()!;
+  return (await db.select().from(schema.exerciseAttempts).where(eq(schema.exerciseAttempts.id, attemptId)).get())!;
 }

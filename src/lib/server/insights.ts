@@ -19,7 +19,7 @@ import { collectionStats, listCollection } from "./vocabulary";
 
 const DAY = 86400000;
 
-function allAttempts() {
+async function allAttempts() {
   return getDb().select().from(schema.exerciseAttempts).all();
 }
 
@@ -27,7 +27,9 @@ function daysSince(d: Date | undefined | null, now: Date) {
   return d ? Math.floor((now.getTime() - d.getTime()) / DAY) : null;
 }
 
-export function lessonProgress(lesson: PathLesson, acts = allCompletedActivities()) {
+type ActivityRow = Awaited<ReturnType<typeof allCompletedActivities>>[number];
+
+export function lessonProgress(lesson: PathLesson, acts: ActivityRow[]) {
   const done = lesson.steps.map((s) => {
     const k = stepActivityKey(s);
     return acts.some((a) => k.kinds.includes(a.kind) && a.refId === k.refId);
@@ -35,12 +37,12 @@ export function lessonProgress(lesson: PathLesson, acts = allCompletedActivities
   return { done, completed: done.every(Boolean), count: done.filter(Boolean).length };
 }
 
-export function nextLesson(acts = allCompletedActivities()) {
+export function nextLesson(acts: ActivityRow[]) {
   return PATH_LESSONS.find((l) => !lessonProgress(l, acts).completed) ?? null;
 }
 
 /** Pick a Real English unit matching the learner's interests, least recently done first. */
-export function suggestContent(profile: Profile, acts = allCompletedActivities()) {
+export function suggestContent(profile: Profile, acts: ActivityRow[]) {
   const interests = new Set(profile.interests);
   const doneIds = new Set(acts.filter((a) => a.kind === "real-english").map((a) => a.refId));
   const ranked = [...REAL_ENGLISH_UNITS].sort((a, b) => {
@@ -53,8 +55,8 @@ export function suggestContent(profile: Profile, acts = allCompletedActivities()
   return ranked[0];
 }
 
-export function mistakeCategorySummary() {
-  const mistakes = listMistakes();
+export async function mistakeCategorySummary() {
+  const mistakes = await listMistakes();
   const map = new Map<string, { active: number; occurrences: number }>();
   for (const m of mistakes) {
     if (m.severity === "style") continue;
@@ -71,9 +73,9 @@ export function mistakeCategorySummary() {
     .sort((a, b) => b.active - a.active || b.occurrences - a.occurrences);
 }
 
-export function grammarTopicSummary() {
-  const stats = topicStats(allAttempts(), "grammar", 60);
-  const flags = getDb().select().from(schema.grammarProgress).all();
+export async function grammarTopicSummary() {
+  const stats = topicStats(await allAttempts(), "grammar", 60);
+  const flags = await getDb().select().from(schema.grammarProgress).all();
   return GRAMMAR_TOPICS.map((t, i) => {
     const s = stats.find((x) => x.topicId === t.id);
     const scenario = t.task.speakingScenarioId ?? SCENARIOS.find((sc) => sc.grammarFocus === t.id)?.id;
@@ -92,27 +94,27 @@ export function grammarTopicSummary() {
   });
 }
 
-export function recommendations() {
-  const collection = listCollection();
+export async function recommendations() {
+  const collection = await listCollection();
   const now = Date.now();
   return recommend({
-    mistakeCategories: mistakeCategorySummary(),
-    topics: grammarTopicSummary(),
+    mistakeCategories: await mistakeCategorySummary(),
+    topics: await grammarTopicSummary(),
     unusedNewExpressions: collection.filter((e) => e.timesUsed === 0 && now - e.createdAt.getTime() < 7 * DAY && e.schedule && e.schedule.repetitions >= 1).map((e) => ({ id: e.id, phrase: e.phrase })),
-    dueReviews: collectionStats().due,
+    dueReviews: (await collectionStats()).due,
     aiConfigured: aiStatus().configured,
   });
 }
 
-export function buildPlan(minutesOverride?: number): DailyPlan {
-  const profile = getProfile();
-  const acts = allCompletedActivities();
+export async function buildPlan(minutesOverride?: number): Promise<DailyPlan> {
+  const profile = await getProfile();
+  const acts = await allCompletedActivities();
   const now = new Date();
   const lastOf = (skill: string) => acts.find((a) => a.skill === skill)?.completedAt;
-  const cats = mistakeCategorySummary();
+  const cats = await mistakeCategorySummary();
   const activeMistakes = cats.reduce((s, c) => s + c.active, 0);
-  const topics = grammarTopicSummary();
-  const diag = getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get();
+  const topics = await grammarTopicSummary();
+  const diag = await getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get();
   const struggling = topics.filter((t) => t.attempts >= 4 && t.accuracy < 0.6).sort((a, b) => a.accuracy - b.accuracy)[0];
   const diagWeak = diag?.weakTopics.find((id) => !topics.find((t) => t.id === id && t.attempts >= 4));
   const weakTopic = struggling
@@ -151,13 +153,13 @@ export function buildPlan(minutesOverride?: number): DailyPlan {
   const wt = WRITING_TASKS.filter((t) => t.id !== "w-free")[dayIndex % (WRITING_TASKS.length - 1)];
   const drill = FLUENCY_DRILLS[dayIndex % FLUENCY_DRILLS.length];
   const content = suggestContent(profile, acts);
-  const learnedSets = new Set(listCollection().map((e) => e.setId));
+  const learnedSets = new Set((await listCollection()).map((e) => e.setId));
   const newSet = VOCAB_SETS.find((s) => !learnedSets.has(s.id)) ?? null;
 
   return planDailySession({
     minutes: minutesOverride ?? profile.sessionMinutes,
     aiConfigured: aiStatus().configured,
-    dueReviews: collectionStats().due,
+    dueReviews: (await collectionStats()).due,
     topMistake: cats[0] && cats[0].active > 0 ? { label: cats[0].label, count: cats[0].occurrences } : null,
     activeMistakes,
     weakTopic,
@@ -174,73 +176,75 @@ export function buildPlan(minutesOverride?: number): DailyPlan {
 
 // ---------------------------------------------------------------- daily sessions
 
-export function todaySession() {
+export async function todaySession() {
   const today = dayKey(new Date());
   return getDb().select().from(schema.dailySessions).where(eq(schema.dailySessions.date, today)).orderBy(desc(schema.dailySessions.id)).get();
 }
 
-export function startDailySession(minutes?: number) {
-  const plan = buildPlan(minutes);
+export async function startDailySession(minutes?: number) {
+  const plan = await buildPlan(minutes);
   return getDb().insert(schema.dailySessions).values({ date: dayKey(new Date()), minutes: plan.minutes, plan, startedAt: new Date() }).returning().get();
 }
 
-export function sessionStatus(s: NonNullable<ReturnType<typeof todaySession>>) {
+export async function sessionStatus(s: NonNullable<Awaited<ReturnType<typeof todaySession>>>) {
   const plan = s.plan as DailyPlan;
-  const acts = getDb().select().from(schema.activities).where(gte(schema.activities.startedAt, s.startedAt)).all();
+  const acts = await getDb().select().from(schema.activities).where(gte(schema.activities.startedAt, s.startedAt)).all();
   const done = stepCompletion(plan.steps, acts, !!s.completedAt);
   const minutes = Math.round(acts.filter((a) => a.completedAt).reduce((sum, a) => sum + a.durationSec, 0) / 60);
   return { plan, done, minutes, activities: acts.filter((a) => a.completedAt) };
 }
 
-export function completeDailySession(id: number, reflection: { difficulty?: string; note?: string }) {
-  getDb()
+export async function completeDailySession(id: number, reflection: { difficulty?: string; note?: string }) {
+  await getDb()
     .update(schema.dailySessions)
     .set({ completedAt: new Date(), reflection: { difficulty: reflection.difficulty?.slice(0, 20), note: reflection.note?.slice(0, 500) } })
     .where(and(eq(schema.dailySessions.id, id)))
     .run();
 }
 
-export function completedDailySessions() {
-  return getDb().select().from(schema.dailySessions).all().filter((s) => s.completedAt);
+export async function completedDailySessions() {
+  return (await getDb().select().from(schema.dailySessions).all()).filter((s) => s.completedAt);
 }
 
 // ---------------------------------------------------------------- dashboard & progress
 
-export function dashboardData() {
-  const profile = getProfile();
-  const acts = allCompletedActivities();
+export async function dashboardData() {
+  const profile = await getProfile();
+  const acts = await allCompletedActivities();
   const now = new Date();
   const metrics = activityMetrics(acts, now, { breakUntil: profile.breakUntil });
-  const attempts = allAttempts();
+  const attempts = await allAttempts();
   return {
     profile,
     metrics,
     skills: skillIndicators(acts, attempts, now),
-    vocab: collectionStats(now),
-    recentExpressions: listCollection().slice(0, 5),
-    mistakes: mistakeCategorySummary().slice(0, 4),
-    recentSpeaking: getDb().select().from(schema.conversationSessions).orderBy(desc(schema.conversationSessions.startedAt)).limit(3).all(),
-    recommendations: recommendations(),
+    vocab: await collectionStats(now),
+    recentExpressions: (await listCollection()).slice(0, 5),
+    mistakes: (await mistakeCategorySummary()).slice(0, 4),
+    recentSpeaking: await getDb().select().from(schema.conversationSessions).orderBy(desc(schema.conversationSessions.startedAt)).limit(3).all(),
+    recommendations: await recommendations(),
     content: suggestContent(profile, acts),
-    sessionsThisWeek: completedDailySessions().filter((s) => s.date >= dayKey(new Date(now.getTime() - 6 * DAY))).length,
+    sessionsThisWeek: (await completedDailySessions()).filter((s) => s.date >= dayKey(new Date(now.getTime() - 6 * DAY))).length,
     hasHistory: acts.length > 0,
   };
 }
 
-export function progressData() {
-  const profile = getProfile();
-  const acts = allCompletedActivities();
-  const attempts = allAttempts();
+export async function progressData() {
+  const profile = await getProfile();
+  const acts = await allCompletedActivities();
+  const attempts = await allAttempts();
   const now = new Date();
-  const mistakes = listMistakes();
-  const events = getDb().select().from(schema.mistakeEvents).all();
+  const mistakes = await listMistakes();
+  const events = await getDb().select().from(schema.mistakeEvents).all();
   const catOf = new Map(mistakes.map((m) => [m.id, m.category]));
-  const retained = getDb()
-    .select()
-    .from(schema.reviewLogs)
+  const retained = (
+    await getDb()
+      .select()
+      .from(schema.reviewLogs)
     .innerJoin(schema.vocabEntries, eq(schema.reviewLogs.vocabId, schema.vocabEntries.id))
-    .where(gte(schema.reviewLogs.createdAt, new Date(now.getTime() - 7 * DAY)))
-    .all()
+      .where(gte(schema.reviewLogs.createdAt, new Date(now.getTime() - 7 * DAY)))
+      .all()
+  )
     .filter((r) => (r.review_logs.rating === "good" || r.review_logs.rating === "easy") && r.review_logs.previousInterval >= 1 && r.review_logs.mode !== "recognition")
     .map((r) => r.vocab_entries.phrase);
 
@@ -254,8 +258,8 @@ export function progressData() {
     categoryLabel: (c) => CATEGORY_LABELS[c as MistakeCategory] ?? c,
   });
 
-  const writing = getDb().select().from(schema.writingDrafts).all().filter((d) => d.feedbackSource === "ai");
-  const speakingSessions = getDb().select().from(schema.conversationSessions).all();
+  const writing = (await getDb().select().from(schema.writingDrafts).all()).filter((d) => d.feedbackSource === "ai");
+  const speakingSessions = await getDb().select().from(schema.conversationSessions).all();
   const b2Topics = new Set(GRAMMAR_TOPICS.filter((t) => t.level.startsWith("B2")).map((t) => t.id));
   const recentB2 = attempts.filter((a) => a.topicId && b2Topics.has(a.topicId) && a.isCorrect !== null && now.getTime() - a.createdAt.getTime() < 30 * DAY);
 
@@ -273,11 +277,11 @@ export function progressData() {
     skills: skillIndicators(acts, attempts, now),
     reflection,
     weeks,
-    vocab: collectionStats(now),
-    mistakes: mistakeCategorySummary(),
+    vocab: await collectionStats(now),
+    mistakes: await mistakeCategorySummary(),
     resolvedMistakes: mistakes.filter((m) => m.status === "resolved").length,
     totalMistakes: mistakes.length,
-    topics: grammarTopicSummary().filter((t) => t.attempts > 0),
+    topics: (await grammarTopicSummary()).filter((t) => t.attempts > 0),
     writingDrafts: writing,
     speakingCount: speakingSessions.filter((s) => s.learnerTurns > 0).length,
     speakingWords: speakingSessions.reduce((s, x) => s + x.learnerWords, 0),
@@ -287,8 +291,8 @@ export function progressData() {
       speakingSessions: speakingSessions.filter((s) => s.learnerTurns >= 3 && now.getTime() - s.startedAt.getTime() < 30 * DAY).length,
       writingWithFeedback: writing.filter((d) => now.getTime() - d.createdAt.getTime() < 30 * DAY).length,
     },
-    diagnostic: getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get(),
+    diagnostic: await getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get(),
     recentActivities: acts.slice(0, 15),
-    completedSessions: completedDailySessions().length,
+    completedSessions: (await completedDailySessions()).length,
   };
 }

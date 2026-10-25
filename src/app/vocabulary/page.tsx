@@ -6,9 +6,9 @@ import { ButtonLink, Card, CardLink, PageHeader, ProgressBar, SectionHead, Stat 
 
 export const metadata: Metadata = { title: "Vocabulary Lab" };
 
-export default function VocabularyPage() {
-  const stats = collectionStats();
-  const collection = listCollection();
+export default async function VocabularyPage() {
+  const stats = await collectionStats();
+  const collection = await listCollection();
   const bySet = new Map<string, number>();
   for (const e of collection) if (e.setId) bySet.set(e.setId, (bySet.get(e.setId) ?? 0) + 1);
   const themes = Object.keys(THEME_LABELS) as Array<keyof typeof THEME_LABELS>;

@@ -8,10 +8,10 @@ import { Reflection } from "@/components/session/Reflection";
 
 export const metadata: Metadata = { title: "Today's session" };
 
-export default function SessionPage() {
-  const s = todaySession();
+export default async function SessionPage() {
+  const s = await todaySession();
   if (!s) {
-    const plan = buildPlan();
+    const plan = await buildPlan();
     return (
       <div className="page page-narrow">
         <PageHeader eyebrow="Today's session" title={plan.mission} lede={plan.objective} />
@@ -26,10 +26,10 @@ export default function SessionPage() {
       </div>
     );
   }
-  const { plan, done, minutes } = sessionStatus(s);
+  const { plan, done, minutes } = await sessionStatus(s);
   const currentIdx = done.findIndex((d, i) => !d && plan.steps[i].kind !== "reflection");
   const allDone = currentIdx === -1;
-  const next = recommendations()[0];
+  const next = (await recommendations())[0];
   return (
     <div className="page page-narrow">
       <PageHeader eyebrow={`Today's mission · ${plan.minutes} minutes`} title={plan.mission} lede={plan.objective}>

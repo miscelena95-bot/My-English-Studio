@@ -12,8 +12,8 @@ export const metadata: Metadata = { title: "Speaking Studio" };
 export default async function SpeakingPage({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
   const { category } = await searchParams;
   const ai = aiStatus();
-  const sessions = listSessions(8);
-  const profile = getProfile();
+  const sessions = await listSessions(8);
+  const profile = await getProfile();
   const cats = Object.keys(CATEGORY_LABELS) as ScenarioCategory[];
   const shown = cats.filter((c) => !category || c === category);
   // Event-organisation and professional scenarios first if those are the learner's focus.

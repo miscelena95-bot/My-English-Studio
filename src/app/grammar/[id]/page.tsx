@@ -20,8 +20,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function TopicPage({ params }: { params: Promise<{ id: string }> }) {
   const t = getGrammarTopic((await params).id);
   if (!t) notFound();
-  const progress = getDb().select().from(schema.grammarProgress).where(eq(schema.grammarProgress.topicId, t.id)).get();
-  const stat = grammarTopicSummary().find((s) => s.id === t.id)!;
+  const progress = await getDb().select().from(schema.grammarProgress).where(eq(schema.grammarProgress.topicId, t.id)).get();
+  const stat = (await grammarTopicSummary()).find((s) => s.id === t.id)!;
   const scenario = t.task.speakingScenarioId ? getScenario(t.task.speakingScenarioId) : undefined;
   const vocab = t.relatedVocabSet ? getVocabSet(t.relatedVocabSet) : undefined;
   const ai = aiStatus().configured;

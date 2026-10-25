@@ -7,9 +7,9 @@ import { CollectionList } from "@/components/vocab/CollectionList";
 
 export const metadata: Metadata = { title: "Saved expressions" };
 
-export default function CollectionPage() {
+export default async function CollectionPage() {
   const now = nowMs();
-  const rows = listCollection().map((e) => ({
+  const rows = (await listCollection()).map((e) => ({
     id: e.id,
     phrase: e.phrase,
     definition: e.definition,

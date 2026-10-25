@@ -9,8 +9,8 @@ import { BreakControl, DeleteControls } from "@/components/settings/DataControls
 
 export const metadata: Metadata = { title: "Settings" };
 
-export default function SettingsPage() {
-  const p = getProfile();
+export default async function SettingsPage() {
+  const p = await getProfile();
   const ai = aiStatus();
   return (
     <div className="page page-narrow">

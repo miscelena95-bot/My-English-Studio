@@ -34,7 +34,7 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
   const today = dayKey(new Date());
   const idx = Math.abs([...today].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % lib.length;
   const eod = lib[idx];
-  const collection = listCollection();
+  const collection = await listCollection();
   const saved = new Set(collection.map((e) => e.libraryId));
 
   // Sprint uses the learner's own collection when it's big enough, otherwise the library.
@@ -44,7 +44,7 @@ export default async function ChallengesPage({ searchParams }: { searchParams: P
 
   // Weekly mission, measured from real activity.
   const ws = weekStartKey(new Date());
-  const acts = allCompletedActivities().filter((a) => dayKey(a.completedAt!) >= ws);
+  const acts = (await allCompletedActivities()).filter((a) => dayKey(a.completedAt!) >= ws);
   const usedThisWeek = collection.filter((e) => e.lastUsedAt && dayKey(e.lastUsedAt) >= ws).length;
   const speaking = acts.filter((a) => a.skill === "speaking").length;
   const writing = acts.filter((a) => a.kind === "writing").length;

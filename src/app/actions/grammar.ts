@@ -10,8 +10,8 @@ import { markUsedExpressions } from "@/lib/server/vocabulary";
 import { wordCount } from "@/lib/domain/text";
 import { run } from "./result";
 
-function upsert(topicId: string, patch: Partial<typeof schema.grammarProgress.$inferInsert>) {
-  getDb()
+async function upsert(topicId: string, patch: Partial<typeof schema.grammarProgress.$inferInsert>) {
+  await getDb()
     .insert(schema.grammarProgress)
     .values({ topicId, ...patch })
     .onConflictDoUpdate({ target: schema.grammarProgress.topicId, set: patch })
@@ -19,17 +19,17 @@ function upsert(topicId: string, patch: Partial<typeof schema.grammarProgress.$i
 }
 
 export async function markLessonOpened(topicId: string) {
-  return run(() => {
+  return run(async () => {
     if (!getGrammarTopic(topicId)) throw new Error("Unknown topic");
-    const existing = getDb().select().from(schema.grammarProgress).all().find((p) => p.topicId === topicId);
-    if (!existing?.lessonOpenedAt) upsert(topicId, { lessonOpenedAt: new Date() });
+    const existing = (await getDb().select().from(schema.grammarProgress).all()).find((p) => p.topicId === topicId);
+    if (!existing?.lessonOpenedAt) await upsert(topicId, { lessonOpenedAt: new Date() });
     return true;
   });
 }
 
 export async function flagForSpeaking(topicId: string, flag: boolean) {
-  return run(() => {
-    upsert(topicId, { flaggedForSpeaking: flag });
+  return run(async () => {
+    await upsert(topicId, { flaggedForSpeaking: flag });
     revalidatePath(`/grammar/${topicId}`);
     return flag;
   });
@@ -44,10 +44,10 @@ export async function submitGrammarTask(topicId: string, text: string, withFeedb
     if (wordCount(clean) < Math.min(15, topic.task.minWords)) throw new Error(`Write at least ${Math.min(15, topic.task.minWords)} words.`);
     const lower = ` ${clean.toLowerCase()} `;
     const checks = topic.task.lookFor.map((l) => ({ label: l.label, found: l.anyOf.some((w) => lower.includes(w.toLowerCase())) }));
-    upsert(topicId, { taskResponse: clean, taskCompletedAt: new Date() });
-    const act = startActivity({ kind: "grammar-task", skill: "writing", refId: topicId, title: `${topic.title}: ${topic.task.title}` });
-    completeActivity(act, { durationSec: seconds, itemsTotal: 1 });
-    markUsedExpressions(clean);
+    await upsert(topicId, { taskResponse: clean, taskCompletedAt: new Date() });
+    const act = await startActivity({ kind: "grammar-task", skill: "writing", refId: topicId, title: `${topic.title}: ${topic.task.title}` });
+    await completeActivity(act, { durationSec: seconds, itemsTotal: 1 });
+    await markUsedExpressions(clean);
     const feedback =
       withFeedback && aiStatus().configured
         ? await productionFeedback({ context: `Grammar Lab communicative task on “${topic.title}”. ${topic.objective}`, prompt: topic.task.prompt, targets: topic.task.lookFor.map((l) => l.label), text: clean, source: "grammar", sourceRef: `task:${topicId}` })

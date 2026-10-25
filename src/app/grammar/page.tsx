@@ -8,10 +8,10 @@ import { pct } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Grammar Lab" };
 
-export default function GrammarPage() {
-  const stats = new Map(grammarTopicSummary().map((t) => [t.id, t]));
-  const diag = getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get();
-  const mistakeTopics = new Set(mistakeCategorySummary().filter((c) => c.active >= 2 && c.topicId).map((c) => c.topicId!));
+export default async function GrammarPage() {
+  const stats = new Map((await grammarTopicSummary()).map((t) => [t.id, t]));
+  const diag = await getDb().select().from(schema.diagnosticResults).orderBy(desc(schema.diagnosticResults.id)).get();
+  const mistakeTopics = new Set((await mistakeCategorySummary()).filter((c) => c.active >= 2 && c.topicId).map((c) => c.topicId!));
   // Prioritise by real performance: struggling topics, then mistakes in your own work, then the diagnostic.
   const priority = GRAMMAR_TOPICS.map((t) => {
     const s = stats.get(t.id)!;

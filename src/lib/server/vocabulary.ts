@@ -12,16 +12,16 @@ export type VocabEntry = typeof schema.vocabEntries.$inferSelect;
 export type ReviewSchedule = typeof schema.reviewSchedules.$inferSelect;
 export type VocabWithSchedule = VocabEntry & { schedule: ReviewSchedule | null };
 
-function insertSchedule(vocabId: number) {
+async function insertSchedule(vocabId: number) {
   const s = newReviewState(new Date());
-  getDb()
+  await getDb()
     .insert(schema.reviewSchedules)
     .values({ vocabId, ...s })
     .onConflictDoNothing()
     .run();
 }
 
-export function findByPhrase(phrase: string) {
+export async function findByPhrase(phrase: string) {
   return getDb()
     .select()
     .from(schema.vocabEntries)
@@ -30,17 +30,17 @@ export function findByPhrase(phrase: string) {
 }
 
 /** Save a built-in expression to the personal collection (idempotent). */
-export function addFromLibrary(key: string, source = "seed", sourceRef?: string) {
+export async function addFromLibrary(key: string, source = "seed", sourceRef?: string) {
   const found = getLibraryEntry(key);
   if (!found) throw new Error(`Unknown expression: ${key}`);
   const { set, entry } = found;
-  const existing = findByPhrase(entry.phrase);
+  const existing = await findByPhrase(entry.phrase);
   if (existing) {
-    if (existing.archived) getDb().update(schema.vocabEntries).set({ archived: false }).where(eq(schema.vocabEntries.id, existing.id)).run();
-    insertSchedule(existing.id);
+    if (existing.archived) await getDb().update(schema.vocabEntries).set({ archived: false }).where(eq(schema.vocabEntries.id, existing.id)).run();
+    await insertSchedule(existing.id);
     return { id: existing.id, created: false };
   }
-  const row = getDb()
+  const row = await getDb()
     .insert(schema.vocabEntries)
     .values({
       libraryId: key,
@@ -63,26 +63,29 @@ export function addFromLibrary(key: string, source = "seed", sourceRef?: string)
     })
     .returning({ id: schema.vocabEntries.id })
     .get();
-  insertSchedule(row.id);
+  await insertSchedule(row.id);
   return { id: row.id, created: true };
 }
 
-export function addSet(setId: string) {
+export async function addSet(setId: string) {
   const set = getVocabSet(setId);
   if (!set) throw new Error("Unknown set");
-  return set.entries.map((e) => addFromLibrary(libraryKey(set.id, e.id), "seed", set.id));
+  const out = [];
+  // Sequential on purpose: keeps the "already saved?" check race-free.
+  for (const e of set.entries) out.push(await addFromLibrary(libraryKey(set.id, e.id), "seed", set.id));
+  return out;
 }
 
 /** Add an expression the learner typed or saved from feedback. Enriches it from the library when possible. */
-export function addCustom(input: CustomVocabInput) {
+export async function addCustom(input: CustomVocabInput) {
   const lib = findLibraryEntryByPhrase(input.phrase);
   if (lib) return addFromLibrary(lib.key, input.source, input.sourceRef ?? undefined);
-  const existing = findByPhrase(input.phrase);
+  const existing = await findByPhrase(input.phrase);
   if (existing) {
-    if (existing.archived) getDb().update(schema.vocabEntries).set({ archived: false }).where(eq(schema.vocabEntries.id, existing.id)).run();
+    if (existing.archived) await getDb().update(schema.vocabEntries).set({ archived: false }).where(eq(schema.vocabEntries.id, existing.id)).run();
     return { id: existing.id, created: false };
   }
-  const row = getDb()
+  const row = await getDb()
     .insert(schema.vocabEntries)
     .values({
       phrase: input.phrase,
@@ -100,24 +103,24 @@ export function addCustom(input: CustomVocabInput) {
     })
     .returning({ id: schema.vocabEntries.id })
     .get();
-  insertSchedule(row.id);
+  await insertSchedule(row.id);
   return { id: row.id, created: true };
 }
 
-export function getEntry(id: number): VocabWithSchedule | undefined {
+export async function getEntry(id: number): Promise<VocabWithSchedule | undefined> {
   const db = getDb();
-  const e = db.select().from(schema.vocabEntries).where(eq(schema.vocabEntries.id, id)).get();
+  const e = await db.select().from(schema.vocabEntries).where(eq(schema.vocabEntries.id, id)).get();
   if (!e) return undefined;
-  const s = db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, id)).get() ?? null;
+  const s = (await db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, id)).get()) ?? null;
   return { ...e, schedule: s };
 }
 
-export function reviewHistory(id: number) {
+export async function reviewHistory(id: number) {
   return getDb().select().from(schema.reviewLogs).where(eq(schema.reviewLogs.vocabId, id)).orderBy(desc(schema.reviewLogs.createdAt)).limit(20).all();
 }
 
-export function listCollection(): VocabWithSchedule[] {
-  const rows = getDb()
+export async function listCollection(): Promise<VocabWithSchedule[]> {
+  const rows = await getDb()
     .select()
     .from(schema.vocabEntries)
     .leftJoin(schema.reviewSchedules, eq(schema.reviewSchedules.vocabId, schema.vocabEntries.id))
@@ -127,8 +130,8 @@ export function listCollection(): VocabWithSchedule[] {
   return rows.map((r) => ({ ...r.vocab_entries, schedule: r.review_schedules }));
 }
 
-export function dueEntries(now = new Date(), limit = 50): VocabWithSchedule[] {
-  const rows = getDb()
+export async function dueEntries(now = new Date(), limit = 50): Promise<VocabWithSchedule[]> {
+  const rows = await getDb()
     .select()
     .from(schema.vocabEntries)
     .innerJoin(schema.reviewSchedules, eq(schema.reviewSchedules.vocabId, schema.vocabEntries.id))
@@ -139,8 +142,8 @@ export function dueEntries(now = new Date(), limit = 50): VocabWithSchedule[] {
   return rows.map((r) => ({ ...r.vocab_entries, schedule: r.review_schedules }));
 }
 
-export function dueCount(now = new Date()): number {
-  const r = getDb()
+export async function dueCount(now = new Date()): Promise<number> {
+  const r = await getDb()
     .select({ n: sql<number>`count(*)` })
     .from(schema.reviewSchedules)
     .innerJoin(schema.vocabEntries, eq(schema.reviewSchedules.vocabId, schema.vocabEntries.id))
@@ -149,31 +152,36 @@ export function dueCount(now = new Date()): number {
   return Number(r?.n ?? 0);
 }
 
-export function recordReview(vocabId: number, input: { rating: Rating; mode: ReviewMode; exerciseType?: string; difficulty?: 1 | 2 | 3 }) {
+export async function recordReview(vocabId: number, input: { rating: Rating; mode: ReviewMode; exerciseType?: string; difficulty?: 1 | 2 | 3 }) {
   const db = getDb();
   const now = new Date();
-  let s = db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, vocabId)).get();
+  let s = await db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, vocabId)).get();
   if (!s) {
-    insertSchedule(vocabId);
-    s = db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, vocabId)).get()!;
+    await insertSchedule(vocabId);
+    s = (await db.select().from(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, vocabId)).get())!;
   }
   const next = scheduleReview(
     { ...s, mastery: s.mastery as "new" | "learning" | "reviewing" | "mastered" },
     { rating: input.rating, mode: input.mode, difficulty: input.difficulty, now },
   );
-  db.update(schema.reviewSchedules).set(next).where(eq(schema.reviewSchedules.vocabId, vocabId)).run();
-  db.insert(schema.reviewLogs)
+  await db.update(schema.reviewSchedules).set(next).where(eq(schema.reviewSchedules.vocabId, vocabId)).run();
+  await db
+    .insert(schema.reviewLogs)
     .values({ vocabId, rating: input.rating, mode: input.mode, exerciseType: input.exerciseType ?? null, previousInterval: s.intervalDays, newInterval: next.intervalDays, createdAt: now })
     .run();
   return next;
 }
 
-export function updateEntry(id: number, patch: Partial<Pick<VocabEntry, "personalNotes" | "archived" | "definition">>) {
-  getDb().update(schema.vocabEntries).set(patch).where(eq(schema.vocabEntries.id, id)).run();
+export async function updateEntry(id: number, patch: Partial<Pick<VocabEntry, "personalNotes" | "archived" | "definition">>) {
+  await getDb().update(schema.vocabEntries).set(patch).where(eq(schema.vocabEntries.id, id)).run();
 }
 
-export function deleteEntry(id: number) {
-  getDb().delete(schema.vocabEntries).where(eq(schema.vocabEntries.id, id)).run();
+export async function deleteEntry(id: number) {
+  const db = getDb();
+  // Explicit child deletes: don't depend on the database's cascade settings.
+  await db.delete(schema.reviewLogs).where(eq(schema.reviewLogs.vocabId, id)).run();
+  await db.delete(schema.reviewSchedules).where(eq(schema.reviewSchedules.vocabId, id)).run();
+  await db.delete(schema.vocabEntries).where(eq(schema.vocabEntries.id, id)).run();
 }
 
 export function toVocabLike(e: VocabEntry): VocabLike {
@@ -202,16 +210,17 @@ export function reviewModeFor(e: VocabWithSchedule): ReviewMode {
  * Detect which saved expressions the learner actually used in their own
  * speaking or writing, and count it. This is how "active vocabulary" is measured.
  */
-export function markUsedExpressions(text: string): VocabEntry[] {
+export async function markUsedExpressions(text: string): Promise<VocabEntry[]> {
   const db = getDb();
   const used: VocabEntry[] = [];
-  const entries = db.select().from(schema.vocabEntries).where(eq(schema.vocabEntries.archived, false)).all();
+  const entries = await db.select().from(schema.vocabEntries).where(eq(schema.vocabEntries.archived, false)).all();
   for (const e of entries) {
     const lib = e.libraryId ? getLibraryEntry(e.libraryId) : undefined;
     const core = phraseCore(e.phrase);
     if (core.split(" ").length < 2 && core.length < 5) continue; // too short to detect reliably
     if (containsPhrase(text, core) || (lib?.entry.forms ?? []).some((f) => f.split(" ").length > 1 && containsPhrase(text, f))) {
-      db.update(schema.vocabEntries)
+      await db
+        .update(schema.vocabEntries)
         .set({ timesUsed: e.timesUsed + 1, lastUsedAt: new Date() })
         .where(eq(schema.vocabEntries.id, e.id))
         .run();
@@ -221,8 +230,8 @@ export function markUsedExpressions(text: string): VocabEntry[] {
   return used;
 }
 
-export function collectionStats(now = new Date()) {
-  const all = listCollection();
+export async function collectionStats(now = new Date()) {
+  const all = await listCollection();
   const by = (m: string) => all.filter((e) => e.schedule?.mastery === m).length;
   return {
     total: all.length,

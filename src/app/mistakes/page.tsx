@@ -11,8 +11,10 @@ export const metadata: Metadata = { title: "Mistake tracker" };
 
 export default async function MistakesPage({ searchParams }: { searchParams: Promise<{ category?: string; status?: string }> }) {
   const sp = await searchParams;
-  const all = listMistakes();
-  const cats = mistakeCategorySummary();
+  const all = await listMistakes();
+  const cats = await mistakeCategorySummary();
+  // Load each shown mistake's history up front (a server component can't await inside JSX).
+  const eventsById = new Map((await Promise.all(all.map((m) => getMistake(m.id)))).filter((x) => !!x).map((x) => [x!.id, x!]));
   const status = sp.status ?? "open";
   const list = all.filter((m) => (!sp.category || m.category === sp.category) && (status === "all" ? true : status === "open" ? m.status !== "resolved" : m.status === status));
   const href = (q: Record<string, string | undefined>) => `/mistakes?${new URLSearchParams(Object.entries({ category: sp.category, status, ...q }).filter(([, v]) => v) as [string, string][])}`;
@@ -36,7 +38,7 @@ export default async function MistakesPage({ searchParams }: { searchParams: Pro
               <Card style={{ padding: "8px 20px" }}>
                 <ul className="list">
                   {list.map((m) => {
-                    const d = getMistake(m.id)!;
+                    const d = eventsById.get(m.id)!;
                     return (
                       <MistakeRow
                         key={m.id}

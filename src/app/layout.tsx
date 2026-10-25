@@ -23,9 +23,9 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const counts = getNavCounts();
-  const profile = getProfile();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const counts = await getNavCounts();
+  const profile = await getProfile();
   return (
     <html lang="en-GB">
       <body>

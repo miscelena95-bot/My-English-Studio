@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { getScenario, type CorrectionMode, type Scenario } from "@/content/speaking/scenarios";
 import { requireAI, getAIProvider } from "@/lib/ai";
@@ -25,7 +25,7 @@ export interface InlineFeedback {
 
 export const MAX_LEARNER_MESSAGE = 2000;
 
-export function startSession(input: {
+export async function startSession(input: {
   scenarioId: string;
   correctionMode: CorrectionMode;
   challenge: boolean;
@@ -35,12 +35,12 @@ export function startSession(input: {
   const scenario = getScenario(input.scenarioId);
   if (!scenario) throw new Error("Unknown scenario");
   // Recycle up to two expressions the learner is currently learning.
-  const recycled = recyclableExpressions(6).filter((e) => !scenario.targetExpressions.some((t) => canonical(t) === canonical(e))).slice(0, 2);
+  const recycled = (await recyclableExpressions(6)).filter((e) => !scenario.targetExpressions.some((t) => canonical(t) === canonical(e))).slice(0, 2);
   const targets = [...scenario.targetExpressions, ...recycled];
   const now = new Date();
-  const activityId = startActivity({ kind: "speaking", skill: "speaking", refId: scenario.id, title: scenario.title, meta: { inputMode: input.inputMode } });
+  const activityId = await startActivity({ kind: "speaking", skill: "speaking", refId: scenario.id, title: scenario.title, meta: { inputMode: input.inputMode } });
   const db = getDb();
-  const session = db
+  const session = await db
     .insert(schema.conversationSessions)
     .values({
       scenarioId: scenario.id,
@@ -59,20 +59,20 @@ export function startSession(input: {
   const opener = input.customTopic
     ? `Great — let's talk about ${input.customTopic}. What made you choose this topic?`
     : scenario.opener;
-  db.insert(schema.conversationMessages).values({ sessionId: session.id, role: "tutor", content: opener, createdAt: now }).run();
+  await db.insert(schema.conversationMessages).values({ sessionId: session.id, role: "tutor", content: opener, createdAt: now }).run();
   return session;
 }
 
-export function getSession(id: number) {
+export async function getSession(id: number) {
   const db = getDb();
-  const session = db.select().from(schema.conversationSessions).where(eq(schema.conversationSessions.id, id)).get();
+  const session = await db.select().from(schema.conversationSessions).where(eq(schema.conversationSessions.id, id)).get();
   if (!session) return undefined;
-  const messages = db.select().from(schema.conversationMessages).where(eq(schema.conversationMessages.sessionId, id)).orderBy(asc(schema.conversationMessages.id)).all();
-  const report = db.select().from(schema.conversationReports).where(eq(schema.conversationReports.sessionId, id)).orderBy(desc(schema.conversationReports.id)).get();
+  const messages = await db.select().from(schema.conversationMessages).where(eq(schema.conversationMessages.sessionId, id)).orderBy(asc(schema.conversationMessages.id)).all();
+  const report = await db.select().from(schema.conversationReports).where(eq(schema.conversationReports.sessionId, id)).orderBy(desc(schema.conversationReports.id)).get();
   return { session, messages, report, scenario: getScenario(session.scenarioId)! };
 }
 
-export function listSessions(limit = 20) {
+export async function listSessions(limit = 20) {
   return getDb().select().from(schema.conversationSessions).orderBy(desc(schema.conversationSessions.startedAt)).limit(limit).all();
 }
 
@@ -90,21 +90,23 @@ function limitCorrections(mode: string, list: Correction[]) {
 
 /** Store the learner's message and get the tutor's reply. */
 export async function sendMessage(sessionId: number, text: string, opts: { inputMode: "typed" | "spoken"; isRetry?: boolean }) {
-  const data = getSession(sessionId);
+  const data = await getSession(sessionId);
   if (!data) throw new Error("Session not found");
   if (data.session.status !== "active") throw new Error("This conversation has ended.");
   const content = text.trim().slice(0, MAX_LEARNER_MESSAGE);
   if (!content) throw new Error("Write or say something first.");
   const db = getDb();
-  db.insert(schema.conversationMessages).values({ sessionId, role: "learner", content, inputMode: opts.inputMode, isRetry: !!opts.isRetry }).run();
-  db.update(schema.conversationSessions)
-    .set({ learnerTurns: data.session.learnerTurns + 1, learnerWords: data.session.learnerWords + wordCount(content) })
+  await db.insert(schema.conversationMessages).values({ sessionId, role: "learner", content, inputMode: opts.inputMode, isRetry: !!opts.isRetry }).run();
+  // Atomic increments: safe even if two requests overlap on a remote database.
+  await db
+    .update(schema.conversationSessions)
+    .set({ learnerTurns: sql`${schema.conversationSessions.learnerTurns} + 1`, learnerWords: sql`${schema.conversationSessions.learnerWords} + ${wordCount(content)}` })
     .where(eq(schema.conversationSessions.id, sessionId))
     .run();
-  markUsedExpressions(content);
+  await markUsedExpressions(content);
 
   const ai = requireAI();
-  const fresh = getSession(sessionId)!;
+  const fresh = (await getSession(sessionId))!;
   const turn = await ai.generate({
     task: "tutor-turn",
     system: tutorSystemPrompt({
@@ -113,7 +115,7 @@ export async function sendMessage(sessionId: number, text: string, opts: { input
       correctionMode: fresh.session.correctionMode as CorrectionMode,
       challenge: fresh.session.challengeMode,
       targetExpressions: fresh.session.targetExpressions,
-      learner: buildLearnerContext(),
+      learner: await buildLearnerContext(),
       inputMode: fresh.session.inputMode as "text" | "voice",
     }),
     messages: historyFor(fresh.messages),
@@ -128,19 +130,23 @@ export async function sendMessage(sessionId: number, text: string, opts: { input
   };
   const reply = turn.reply.trim();
   if (!reply) throw new Error("The tutor returned an empty reply. Please try again.");
-  db.insert(schema.conversationMessages).values({ sessionId, role: "tutor", content: reply, feedback }).run();
-  return getSession(sessionId)!;
+  await db.insert(schema.conversationMessages).values({ sessionId, role: "tutor", content: reply, feedback }).run();
+  return (await getSession(sessionId))!;
 }
 
 /** Remove the last learner message if the tutor failed to answer, so the learner can resend it. */
-export function popUnansweredLearnerMessage(sessionId: number): string | null {
-  const data = getSession(sessionId);
+export async function popUnansweredLearnerMessage(sessionId: number): Promise<string | null> {
+  const data = await getSession(sessionId);
   const last = data?.messages[data.messages.length - 1];
   if (!data || !last || last.role !== "learner") return null;
   const db = getDb();
-  db.delete(schema.conversationMessages).where(eq(schema.conversationMessages.id, last.id)).run();
-  db.update(schema.conversationSessions)
-    .set({ learnerTurns: Math.max(0, data.session.learnerTurns - 1), learnerWords: Math.max(0, data.session.learnerWords - wordCount(last.content)) })
+  await db.delete(schema.conversationMessages).where(eq(schema.conversationMessages.id, last.id)).run();
+  await db
+    .update(schema.conversationSessions)
+    .set({
+      learnerTurns: sql`max(0, ${schema.conversationSessions.learnerTurns} - 1)`,
+      learnerWords: sql`max(0, ${schema.conversationSessions.learnerWords} - ${wordCount(last.content)})`,
+    })
     .where(eq(schema.conversationSessions.id, sessionId))
     .run();
   return last.content;
@@ -152,10 +158,10 @@ const HintSchema = z.object({
 });
 
 export async function getHint(sessionId: number) {
-  const data = getSession(sessionId);
+  const data = await getSession(sessionId);
   if (!data) throw new Error("Session not found");
   const db = getDb();
-  db.update(schema.conversationSessions).set({ hintsUsed: data.session.hintsUsed + 1 }).where(eq(schema.conversationSessions.id, sessionId)).run();
+  await db.update(schema.conversationSessions).set({ hintsUsed: sql`${schema.conversationSessions.hintsUsed} + 1` }).where(eq(schema.conversationSessions.id, sessionId)).run();
   const ai = getAIProvider();
   if (!ai) {
     // Deterministic hint from the scenario itself — clearly not a tutor reply.
@@ -169,7 +175,7 @@ export async function getHint(sessionId: number) {
       correctionMode: "fluency",
       challenge: false,
       targetExpressions: data.session.targetExpressions,
-      learner: buildLearnerContext(),
+      learner: await buildLearnerContext(),
       inputMode: data.session.inputMode as "text" | "voice",
     }),
     messages: [...historyFor(data.messages), { role: "user", content: "(The learner pressed the Hint button. Help them continue without answering for them.)" }],
@@ -180,8 +186,8 @@ export async function getHint(sessionId: number) {
   return { source: "tutor" as const, hint: h.hint, starters: h.starters.slice(0, 3) };
 }
 
-export function updateSessionSettings(sessionId: number, patch: { correctionMode?: CorrectionMode; challengeMode?: boolean }) {
-  getDb().update(schema.conversationSessions).set(patch).where(eq(schema.conversationSessions.id, sessionId)).run();
+export async function updateSessionSettings(sessionId: number, patch: { correctionMode?: CorrectionMode; challengeMode?: boolean }) {
+  await getDb().update(schema.conversationSessions).set(patch).where(eq(schema.conversationSessions.id, sessionId)).run();
 }
 
 function learnerText(messages: Message[]) {
@@ -193,37 +199,37 @@ function learnerText(messages: Message[]) {
 
 /** End the conversation and produce the feedback report (if AI is available). */
 export async function endSession(sessionId: number) {
-  const data = getSession(sessionId);
+  const data = await getSession(sessionId);
   if (!data) throw new Error("Session not found");
   const db = getDb();
   if (data.session.status === "active") {
-    db.update(schema.conversationSessions).set({ status: "ended", endedAt: new Date() }).where(eq(schema.conversationSessions.id, sessionId)).run();
+    await db.update(schema.conversationSessions).set({ status: "ended", endedAt: new Date() }).where(eq(schema.conversationSessions.id, sessionId)).run();
     if (data.session.activityId)
-      completeActivity(data.session.activityId, {
+      await completeActivity(data.session.activityId, {
         itemsTotal: data.session.learnerTurns,
         meta: { turns: data.session.learnerTurns, words: data.session.learnerWords, mode: data.session.correctionMode },
       });
   }
-  if (data.report || data.session.learnerTurns === 0) return getSession(sessionId)!;
+  if (data.report || data.session.learnerTurns === 0) return (await getSession(sessionId))!;
   await generateReport(sessionId);
-  return getSession(sessionId)!;
+  return (await getSession(sessionId))!;
 }
 
 export async function generateReport(sessionId: number) {
-  const data = getSession(sessionId)!;
+  const data = (await getSession(sessionId))!;
   const ai = requireAI();
   const text = learnerText(data.messages);
   const transcript = data.messages.map((m) => `${m.role === "learner" ? "LEARNER" : "PARTNER"}: ${m.content}`).join("\n");
   const raw = await ai.generate({
     task: "conversation-report",
-    system: reportSystemPrompt({ scenario: data.scenario, targetExpressions: data.session.targetExpressions, learner: buildLearnerContext(), inputMode: data.session.inputMode as "text" | "voice" }),
+    system: reportSystemPrompt({ scenario: data.scenario, targetExpressions: data.session.targetExpressions, learner: await buildLearnerContext(), inputMode: data.session.inputMode as "text" | "voice" }),
     messages: [{ role: "user", content: `Full transcript:\n${transcript}\n\nThe learner's messages only (quote from these):\n${text}` }],
     schema: ConversationReport,
     maxTokens: 6000,
     effort: "medium",
   });
   const report = validateReport(raw, text);
-  getDb().insert(schema.conversationReports).values({ sessionId, report }).run();
+  await getDb().insert(schema.conversationReports).values({ sessionId, report }).run();
 
   // Log mistakes once: report corrections plus inline corrections not already covered.
   const inline = data.messages.flatMap((m) => ((m.feedback as InlineFeedback | null)?.corrections ?? []));
@@ -232,18 +238,18 @@ export async function generateReport(sessionId: number) {
     const k = canonical(c.original);
     if (seen.has(k) || c.kind === "style") continue;
     seen.add(k);
-    logMistake({ original: c.original, corrected: c.corrected, explanation: c.explanation, category: c.category, severity: c.kind, source: "speaking", sourceRef: `session:${sessionId}`, context: data.scenario.title });
+    await logMistake({ original: c.original, corrected: c.corrected, explanation: c.explanation, category: c.category, severity: c.kind, source: "speaking", sourceRef: `session:${sessionId}`, context: data.scenario.title });
   }
   // Privacy preference: keep only the report, not the transcript.
-  if (!getProfile().storeTranscripts) getDb().delete(schema.conversationMessages).where(eq(schema.conversationMessages.sessionId, sessionId)).run();
+  if (!(await getProfile()).storeTranscripts) await getDb().delete(schema.conversationMessages).where(eq(schema.conversationMessages.sessionId, sessionId)).run();
   return report;
 }
 
-export function saveFollowUp(sessionId: number, response: string) {
-  const data = getSession(sessionId);
+export async function saveFollowUp(sessionId: number, response: string) {
+  const data = await getSession(sessionId);
   if (!data?.report) throw new Error("No report for this session yet.");
-  const used = markUsedExpressions(response);
-  getDb()
+  const used = await markUsedExpressions(response);
+  await getDb()
     .update(schema.conversationReports)
     .set({ followUpDone: true, followUpResponse: response.slice(0, 3000) })
     .where(eq(schema.conversationReports.id, data.report.id))
@@ -251,8 +257,12 @@ export function saveFollowUp(sessionId: number, response: string) {
   return used.map((u) => u.phrase);
 }
 
-export function deleteSessionTranscript(sessionId: number) {
-  getDb().delete(schema.conversationSessions).where(eq(schema.conversationSessions.id, sessionId)).run();
+export async function deleteSessionTranscript(sessionId: number) {
+  const db = getDb();
+  // Explicit child deletes: don't depend on the database's cascade settings.
+  await db.delete(schema.conversationMessages).where(eq(schema.conversationMessages.sessionId, sessionId)).run();
+  await db.delete(schema.conversationReports).where(eq(schema.conversationReports.sessionId, sessionId)).run();
+  await db.delete(schema.conversationSessions).where(eq(schema.conversationSessions.id, sessionId)).run();
 }
 
 export type { Scenario };

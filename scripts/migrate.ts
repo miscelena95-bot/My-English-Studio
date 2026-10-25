@@ -1,4 +1,5 @@
-import { getDb } from "../src/lib/db";
+import { databaseConfig, migrateDb } from "../src/lib/db";
 
-getDb();
-console.log("Database is up to date:", process.env.DATABASE_PATH || "./data/studio.db");
+const cfg = databaseConfig();
+await migrateDb();
+console.log(`Database is up to date: ${cfg.local ? cfg.url : cfg.url.replace(/\/\/.*@/, "//")}`);

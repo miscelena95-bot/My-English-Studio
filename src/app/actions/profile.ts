@@ -26,13 +26,13 @@ function fieldErrors(e: z.ZodError) {
 export async function saveOnboarding(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = ProfileUpdateSchema.safeParse({ ...profileFromFormData(formData), showStreak: true, storeTranscripts: true, weeklyGoalMinutes: Number(formData.get("sessionMinutes") ?? 25) * 6, weeklyGoalSessions: 5 });
   if (!parsed.success) return { ok: false, errors: fieldErrors(parsed.error) };
-  updateProfile({ ...parsed.data, onboardingCompletedAt: new Date() });
+  await updateProfile({ ...parsed.data, onboardingCompletedAt: new Date() });
   revalidatePath("/", "layout");
   redirect(formData.get("next") === "diagnostic" ? "/welcome/diagnostic" : "/");
 }
 
 export async function applyDefaults() {
-  updateProfile({ onboardingCompletedAt: new Date() });
+  await updateProfile({ onboardingCompletedAt: new Date() });
   revalidatePath("/", "layout");
   redirect("/welcome/diagnostic");
 }
@@ -40,7 +40,7 @@ export async function applyDefaults() {
 export async function saveSettings(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = ProfileUpdateSchema.safeParse(profileFromFormData(formData));
   if (!parsed.success) return { ok: false, errors: fieldErrors(parsed.error) };
-  updateProfile(parsed.data);
+  await updateProfile(parsed.data);
   revalidatePath("/", "layout");
   return { ok: true, message: "Your preferences have been saved." };
 }
@@ -85,7 +85,7 @@ export async function submitDiagnostic(input: unknown) {
     const self: Record<string, number> = {};
     for (const s of SELF_ASSESSMENT_SKILLS) if (d.self[s.id]) self[s.id] = d.self[s.id];
 
-    getDb()
+    await getDb()
       .insert(schema.diagnosticResults)
       .values({
         grammarCorrect: grammar.filter((g) => g.correct).length,
@@ -102,9 +102,9 @@ export async function submitDiagnostic(input: unknown) {
         weakTopics: est.weakTopics,
       })
       .run();
-    updateProfile({ estimatedLevel: est.level, levelEvidence: evidence, diagnosticCompletedAt: new Date() });
-    const act = startActivity({ kind: "diagnostic", skill: "grammar", refId: "diagnostic", title: "Initial diagnostic" });
-    completeActivity(act, { durationSec: d.seconds, itemsTotal: graded.length, itemsCorrect: graded.filter((g) => g.correct).length });
+    await updateProfile({ estimatedLevel: est.level, levelEvidence: evidence, diagnosticCompletedAt: new Date() });
+    const act = await startActivity({ kind: "diagnostic", skill: "grammar", refId: "diagnostic", title: "Initial diagnostic" });
+    await completeActivity(act, { durationSec: d.seconds, itemsTotal: graded.length, itemsCorrect: graded.filter((g) => g.correct).length });
     revalidatePath("/", "layout");
     return { level: est.level, weakTopics: est.weakTopics, evidence };
   });
@@ -113,11 +113,19 @@ export async function submitDiagnostic(input: unknown) {
 /** Privacy: remove stored conversation transcripts and writing (keeps aggregated progress). */
 export async function deleteLearningRecords(kind: "transcripts" | "writing" | "everything") {
   const db = getDb();
-  if (kind === "transcripts" || kind === "everything") db.delete(schema.conversationSessions).run();
-  if (kind === "writing" || kind === "everything") db.delete(schema.writingSubmissions).run();
+  // Children first, explicitly: never depend on the database's cascade settings.
+  if (kind === "transcripts" || kind === "everything") {
+    await db.delete(schema.conversationMessages).run();
+    await db.delete(schema.conversationReports).run();
+    await db.delete(schema.conversationSessions).run();
+  }
+  if (kind === "writing" || kind === "everything") {
+    await db.delete(schema.writingDrafts).run();
+    await db.delete(schema.writingSubmissions).run();
+  }
   if (kind === "everything") {
     for (const t of [schema.exerciseAttempts, schema.reviewLogs, schema.reviewSchedules, schema.vocabEntries, schema.mistakeEvents, schema.mistakes, schema.dailySessions, schema.contentProgress, schema.contentResources, schema.grammarProgress, schema.diagnosticResults, schema.progressSnapshots, schema.activities, schema.learnerProfile])
-      db.delete(t).run();
+      await db.delete(t).run();
   }
   revalidatePath("/", "layout");
   if (kind === "everything") redirect("/welcome");
@@ -125,17 +133,17 @@ export async function deleteLearningRecords(kind: "transcripts" | "writing" | "e
 }
 
 export async function setBreak(until: string | null) {
-  return run(() => {
+  return run(async () => {
     if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Error("Invalid date");
-    updateProfile({ breakUntil: until });
+    await updateProfile({ breakUntil: until });
     revalidatePath("/", "layout");
-    return getProfile().breakUntil;
+    return (await getProfile()).breakUntil;
   });
 }
 
 export async function saveVoicePreference(voiceName: string | null, speechRate: number) {
-  return run(() => {
-    updateProfile({ voiceName: voiceName?.slice(0, 200) ?? null, speechRate: Math.min(1.4, Math.max(0.6, speechRate)) });
+  return run(async () => {
+    await updateProfile({ voiceName: voiceName?.slice(0, 200) ?? null, speechRate: Math.min(1.4, Math.max(0.6, speechRate)) });
     return true;
   });
 }

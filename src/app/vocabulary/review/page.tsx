@@ -10,11 +10,11 @@ import { describeInterval } from "@/lib/domain/srs";
 
 export const metadata: Metadata = { title: "Review" };
 
-export default function ReviewPage() {
-  const due = dueEntries(new Date(), 12);
+export default async function ReviewPage() {
+  const due = await dueEntries(new Date(), 12);
   const ai = aiStatus().configured;
   if (!due.length) {
-    const upcoming = listCollection()
+    const upcoming = (await listCollection())
       .filter((e) => e.schedule)
       .sort((a, b) => a.schedule!.dueAt.getTime() - b.schedule!.dueAt.getTime())[0];
     return (

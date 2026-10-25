@@ -24,7 +24,7 @@ export interface MistakeInput {
  * Log a mistake. Repeated instances of the same pattern are grouped (and a
  * mistake that was resolved becomes active again), so frequency is real.
  */
-export function logMistake(input: MistakeInput): { id: number; repeated: boolean } {
+export async function logMistake(input: MistakeInput): Promise<{ id: number; repeated: boolean }> {
   const db = getDb();
   const original = input.original.trim();
   const corrected = input.corrected.trim();
@@ -33,11 +33,12 @@ export function logMistake(input: MistakeInput): { id: number; repeated: boolean
   const category: MistakeCategory = input.category ? normaliseCategory(input.category) : categoriseCorrection(original, corrected);
   const key = patternKey(category, input.pattern, corrected);
   const now = new Date();
-  const existing = db.select().from(schema.mistakes).where(eq(schema.mistakes.patternKey, key)).get();
+  const existing = await db.select().from(schema.mistakes).where(eq(schema.mistakes.patternKey, key)).get();
 
   if (existing) {
     const next = afterOccurrence(existing);
-    db.update(schema.mistakes)
+    await db
+      .update(schema.mistakes)
       .set({
         occurrences: next.occurrences,
         status: next.status,
@@ -52,11 +53,11 @@ export function logMistake(input: MistakeInput): { id: number; repeated: boolean
       })
       .where(eq(schema.mistakes.id, existing.id))
       .run();
-    db.insert(schema.mistakeEvents).values({ mistakeId: existing.id, type: next.regressed ? "regressed" : "occurred", text: original, source: input.source }).run();
+    await db.insert(schema.mistakeEvents).values({ mistakeId: existing.id, type: next.regressed ? "regressed" : "occurred", text: original, source: input.source }).run();
     return { id: existing.id, repeated: true };
   }
 
-  const row = db
+  const row = await db
     .insert(schema.mistakes)
     .values({
       original,
@@ -74,37 +75,39 @@ export function logMistake(input: MistakeInput): { id: number; repeated: boolean
     })
     .returning({ id: schema.mistakes.id })
     .get();
-  db.insert(schema.mistakeEvents).values({ mistakeId: row.id, type: "occurred", text: original, source: input.source }).run();
+  await db.insert(schema.mistakeEvents).values({ mistakeId: row.id, type: "occurred", text: original, source: input.source }).run();
   return { id: row.id, repeated: false };
 }
 
-export function listMistakes(): Mistake[] {
+export async function listMistakes(): Promise<Mistake[]> {
   return getDb().select().from(schema.mistakes).orderBy(desc(schema.mistakes.lastSeenAt)).all();
 }
 
-export function getMistake(id: number) {
+export async function getMistake(id: number) {
   const db = getDb();
-  const m = db.select().from(schema.mistakes).where(eq(schema.mistakes.id, id)).get();
+  const m = await db.select().from(schema.mistakes).where(eq(schema.mistakes.id, id)).get();
   if (!m) return undefined;
-  const events = db.select().from(schema.mistakeEvents).where(eq(schema.mistakeEvents.mistakeId, id)).orderBy(desc(schema.mistakeEvents.createdAt)).all();
+  const events = await db.select().from(schema.mistakeEvents).where(eq(schema.mistakeEvents.mistakeId, id)).orderBy(desc(schema.mistakeEvents.createdAt)).all();
   return { ...m, events };
 }
 
-export function activeMistakeCount() {
-  return getDb().select().from(schema.mistakes).where(ne(schema.mistakes.status, "resolved")).all().filter((m) => m.severity !== "style").length;
+export async function activeMistakeCount() {
+  const rows = await getDb().select().from(schema.mistakes).where(ne(schema.mistakes.status, "resolved")).all();
+  return rows.filter((m) => m.severity !== "style").length;
 }
 
-export function mistakesForReview(n = 5, focus: MistakeCategory[] = []) {
-  return selectForReview(listMistakes(), n, new Date(), focus);
+export async function mistakesForReview(n = 5, focus: MistakeCategory[] = []) {
+  return selectForReview(await listMistakes(), n, new Date(), focus);
 }
 
-export function recordMistakePractice(id: number, correct: boolean, response: string) {
+export async function recordMistakePractice(id: number, correct: boolean, response: string) {
   const db = getDb();
-  const m = db.select().from(schema.mistakes).where(eq(schema.mistakes.id, id)).get();
+  const m = await db.select().from(schema.mistakes).where(eq(schema.mistakes.id, id)).get();
   if (!m) return;
   const now = new Date();
   const next = afterPractice(m, correct, now);
-  db.update(schema.mistakes)
+  await db
+    .update(schema.mistakes)
     .set({
       status: next.status,
       consecutiveCorrect: next.consecutiveCorrect,
@@ -115,18 +118,19 @@ export function recordMistakePractice(id: number, correct: boolean, response: st
     })
     .where(eq(schema.mistakes.id, id))
     .run();
-  db.insert(schema.mistakeEvents).values({ mistakeId: id, type: correct ? "practised-correct" : "practised-incorrect", text: response, source: "mistake-review" }).run();
+  await db.insert(schema.mistakeEvents).values({ mistakeId: id, type: correct ? "practised-correct" : "practised-incorrect", text: response, source: "mistake-review" }).run();
   return next;
 }
 
 /** The learner disagrees that this was a mistake (e.g. a valid alternative). */
-export function dismissMistake(id: number) {
-  getDb().delete(schema.mistakes).where(eq(schema.mistakes.id, id)).run();
+export async function dismissMistake(id: number) {
+  await getDb().delete(schema.mistakeEvents).where(eq(schema.mistakeEvents.mistakeId, id)).run();
+  await getDb().delete(schema.mistakes).where(eq(schema.mistakes.id, id)).run();
 }
 
-export function categoryCounts() {
+export async function categoryCounts() {
   const counts = new Map<string, { active: number; total: number; occurrences: number }>();
-  for (const m of listMistakes()) {
+  for (const m of await listMistakes()) {
     const c = counts.get(m.category) ?? { active: 0, total: 0, occurrences: 0 };
     c.total++;
     c.occurrences += m.occurrences;

@@ -11,10 +11,10 @@ export const metadata: Metadata = { title: "Learning Path" };
 
 const KIND: Record<string, string> = { vocab: "Expressions", grammar: "Grammar", speaking: "Speaking", writing: "Writing", "real-english": "Real English" };
 
-export default function PathPage() {
-  const acts = allCompletedActivities();
+export default async function PathPage() {
+  const acts = await allCompletedActivities();
   const next = nextLesson(acts);
-  const profile = getProfile();
+  const profile = await getProfile();
   const completed = PATH_LESSONS.filter((l) => lessonProgress(l, acts).completed).length;
   return (
     <div className="page">

@@ -28,40 +28,40 @@ export async function startConversation(formData: FormData) {
     inputMode: formData.get("inputMode") === "voice" ? "voice" : "text",
     customTopic: (formData.get("customTopic") as string) || null,
   });
-  const s = startSession(input);
+  const s = await startSession(input);
   redirect(`/speaking/${s.id}`);
 }
 
 export async function sendLearnerMessage(sessionId: number, text: string, inputMode: "typed" | "spoken", isRetry = false) {
-  const r = await run(() => sendMessage(sessionId, text, { inputMode, isRetry }));
+  const r = await run(async () => sendMessage(sessionId, text, { inputMode, isRetry }));
   if (!r.ok) {
     // Keep the transcript consistent: the learner's text is returned so they can resend it.
-    const restored = popUnansweredLearnerMessage(sessionId);
+    const restored = await popUnansweredLearnerMessage(sessionId);
     return { ...r, restored };
   }
   return { ok: true as const, data: { messages: r.data.messages } };
 }
 
 export async function requestHint(sessionId: number) {
-  return run(() => getHint(sessionId));
+  return run(async () => getHint(sessionId));
 }
 
 export async function changeSessionSettings(sessionId: number, patch: { correctionMode?: "fluency" | "coaching" | "precision"; challengeMode?: boolean }) {
-  return run(() => {
-    updateSessionSettings(sessionId, patch);
+  return run(async () => {
+    await updateSessionSettings(sessionId, patch);
     return true;
   });
 }
 
 export async function finishConversation(sessionId: number) {
-  const r = await run(() => endSession(sessionId));
+  const r = await run(async () => endSession(sessionId));
   revalidatePath("/", "layout");
   return r.ok ? { ok: true as const, data: { hasReport: !!r.data.report } } : r;
 }
 
 export async function retryReport(sessionId: number) {
   return run(async () => {
-    const d = getSession(sessionId);
+    const d = await getSession(sessionId);
     if (!d?.report) await generateReport(sessionId);
     revalidatePath(`/speaking/${sessionId}`);
     return true;
@@ -70,8 +70,8 @@ export async function retryReport(sessionId: number) {
 
 export async function submitFollowUp(sessionId: number, text: string, withFeedback: boolean) {
   return run(async () => {
-    const used = saveFollowUp(sessionId, text);
-    const d = getSession(sessionId)!;
+    const used = await saveFollowUp(sessionId, text);
+    const d = (await getSession(sessionId))!;
     const report = d.report!.report as { followUpTask: { instruction: string; targetExpressions: string[] } };
     const feedback = withFeedback && aiStatus().configured
       ? await productionFeedback({ context: `Follow-up after the conversation “${d.session.title}”`, prompt: report.followUpTask.instruction, targets: report.followUpTask.targetExpressions, text, source: "speaking", sourceRef: `session:${sessionId}` })
@@ -81,7 +81,7 @@ export async function submitFollowUp(sessionId: number, text: string, withFeedba
 }
 
 export async function deleteConversation(sessionId: number) {
-  deleteSessionTranscript(sessionId);
+  await deleteSessionTranscript(sessionId);
   revalidatePath("/", "layout");
   redirect("/speaking");
 }
@@ -93,10 +93,10 @@ export async function submitFluencyDrill(input: { drillId: string; text: string;
     if (!drill) throw new Error("Unknown drill");
     const text = input.text.trim().slice(0, 4000);
     if (!text) throw new Error("There's no response to save yet.");
-    const id = startActivity({ kind: "fluency", skill: "speaking", refId: drill.id, title: drill.title, meta: { inputMode: input.inputMode } });
-    const used = markUsedExpressions(text).map((u) => u.phrase);
+    const id = await startActivity({ kind: "fluency", skill: "speaking", refId: drill.id, title: drill.title, meta: { inputMode: input.inputMode } });
+    const used = (await markUsedExpressions(text)).map((u) => u.phrase);
     const words = text.split(/\s+/).filter(Boolean).length;
-    completeActivity(id, { durationSec: Math.max(input.seconds, 30) + 60, itemsTotal: 1, meta: { words, seconds: input.seconds, inputMode: input.inputMode } });
+    await completeActivity(id, { durationSec: Math.max(input.seconds, 30) + 60, itemsTotal: 1, meta: { words, seconds: input.seconds, inputMode: input.inputMode } });
     const feedback =
       input.withFeedback && aiStatus().configured
         ? await productionFeedback({ context: `Fluency drill: ${drill.title}. ${drill.instruction}`, prompt: drill.prompt, targets: [...(drill.keywords ?? []), ...(drill.targets ?? [])], text, source: "speaking", sourceRef: `drill:${drill.id}`, inputMode: input.inputMode })

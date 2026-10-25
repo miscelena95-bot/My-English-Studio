@@ -17,10 +17,10 @@ import { SaveExpressionButton } from "@/components/vocab/VocabButtons";
 export const metadata: Metadata = { title: "Conversation" };
 
 export default async function ConversationPage({ params }: { params: Promise<{ id: string }> }) {
-  const data = getSession(Number((await params).id));
+  const data = await getSession(Number((await params).id));
   if (!data) notFound();
   const { session, messages, report, scenario } = data;
-  const p = getProfile();
+  const p = await getProfile();
   const ai = aiStatus().configured;
 
   if (session.status === "active")

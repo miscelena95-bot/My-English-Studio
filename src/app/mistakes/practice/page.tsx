@@ -26,7 +26,7 @@ function relatedExercise(m: { category: string; patternKey: string; grammarTopic
 
 export default async function MistakePractice({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
   const { category } = await searchParams;
-  const chosen = category ? selectForReview(listMistakes().filter((m) => m.category === category), 5, new Date()) : mistakesForReview(5);
+  const chosen = category ? selectForReview((await listMistakes()).filter((m) => m.category === category), 5, new Date()) : await mistakesForReview(5);
   if (!chosen.length)
     return (
       <div className="page page-narrow">

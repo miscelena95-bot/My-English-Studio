@@ -12,7 +12,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function SetPage({ params }: { params: Promise<{ id: string }> }) {
   const set = getVocabSet((await params).id);
   if (!set) notFound();
-  const saved = new Set(listCollection().map((e) => e.libraryId));
+  const saved = new Set((await listCollection()).map((e) => e.libraryId));
   const inCollection = set.entries.filter((e) => saved.has(libraryKey(set.id, e.id))).length;
   return (
     <div className="page page-narrow">

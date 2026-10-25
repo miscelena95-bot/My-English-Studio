@@ -15,7 +15,8 @@ export class AnthropicProvider implements AIProvider {
     readonly model: string = DEFAULT_ANTHROPIC_MODEL,
     baseURL?: string,
   ) {
-    this.client = new Anthropic({ apiKey, baseURL, timeout: 90_000, maxRetries: 2 });
+    // Worst case 2 × 60 s stays well inside a 300 s serverless function limit.
+    this.client = new Anthropic({ apiKey, baseURL, timeout: 60_000, maxRetries: 1 });
   }
 
   async generate<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {

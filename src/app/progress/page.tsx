@@ -17,8 +17,8 @@ const SKILL_NOTE: Record<string, string> = {
   listening: "Comprehension questions on listening units.",
 };
 
-export default function ProgressPage() {
-  const d = progressData();
+export default async function ProgressPage() {
+  const d = await progressData();
   const level = d.profile.estimatedLevel ?? d.profile.selfAssessedLevel;
   const signal = performanceSignal(level, d.evidence);
   const maxWeek = Math.max(1, ...d.weeks.map((w) => w.minutes));

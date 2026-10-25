@@ -6,20 +6,20 @@ import { createSubmission, deleteSubmission, requestAIFeedback, saveDraft, start
 import { run } from "./result";
 
 export async function newSubmission(taskId: string) {
-  const s = createSubmission(taskId);
+  const s = await createSubmission(taskId);
   redirect(`/writing/s/${s.id}`);
 }
 
 export async function autosaveDraft(submissionId: number, text: string) {
-  return run(() => {
-    saveDraft(submissionId, text);
+  return run(async () => {
+    await saveDraft(submissionId, text);
     return { savedAt: new Date().toISOString() };
   });
 }
 
 export async function getWritingFeedback(submissionId: number, text: string, seconds: number) {
   const r = await run(async () => {
-    saveDraft(submissionId, text);
+    await saveDraft(submissionId, text);
     return requestAIFeedback(submissionId, { seconds });
   });
   revalidatePath(`/writing/s/${submissionId}`);
@@ -28,9 +28,9 @@ export async function getWritingFeedback(submissionId: number, text: string, sec
 }
 
 export async function saveSelfReview(submissionId: number, text: string, checks: Record<string, boolean>, seconds: number) {
-  const r = await run(() => {
-    saveDraft(submissionId, text);
-    submitSelfReview(submissionId, checks, { seconds });
+  const r = await run(async () => {
+    await saveDraft(submissionId, text);
+    await submitSelfReview(submissionId, checks, { seconds });
     return true;
   });
   revalidatePath(`/writing/s/${submissionId}`);
@@ -39,13 +39,13 @@ export async function saveSelfReview(submissionId: number, text: string, checks:
 }
 
 export async function reviseDraft(submissionId: number) {
-  const r = await run(() => startRevision(submissionId));
+  const r = await run(async () => await startRevision(submissionId));
   revalidatePath(`/writing/s/${submissionId}`);
   return r.ok ? { ok: true as const, data: { version: r.data.version } } : r;
 }
 
 export async function removeSubmission(id: number) {
-  deleteSubmission(id);
+  await deleteSubmission(id);
   revalidatePath("/writing");
   redirect("/writing");
 }
