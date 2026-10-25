@@ -51,6 +51,7 @@ All configuration is via environment variables (see `.env.example`). Secrets are
 | `ANTHROPIC_API_KEY` | Enables the AI tutor (conversations, reports, writing feedback, answer checks, activity building). Paid usage. |
 | `AI_MODEL` | Optional. Default `claude-opus-5-5`. |
 | `AI_BASE_URL` | Optional override of the API base URL (used by the tests). |
+| `HTTPS_PROXY` / `NO_PROXY` | Respected by `npm run check:links` (exit 0 = all OK, 1 = a broken link, 2 = some links unreachable from this network). |
 | `GUARDIAN_API_KEY` | Optional. Free developer key from <https://open-platform.theguardian.com/access/> for recent news. |
 | `DATABASE_PATH` | SQLite file location. Default `./data/studio.db`. |
 | `STUDIO_TIMEZONE` | Default `Europe/Rome`. Used for "today", weeks and streaks. |
