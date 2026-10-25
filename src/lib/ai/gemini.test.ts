@@ -41,6 +41,13 @@ describe("GeminiProvider (against a local test double)", () => {
     expect(used).toEqual(["gemini-3.6-flash"]);
   });
 
+  it("also switches model when the first one is overloaded", async () => {
+    const p = new GeminiProvider("test-key", "overloaded-flash", "gemini-3.6-flash", base);
+    const out = await p.generate(req);
+    expect(out.verdict).toBe("correct");
+    expect(calls.slice(-2).map((c: { model: string }) => c.model)).toEqual(["overloaded-flash", "gemini-3.6-flash"]);
+  });
+
   it("reports a used-up quota on both models as 'quota'", async () => {
     const p = new GeminiProvider("test-key", "exhausted-a", "exhausted-b", base);
     await expect(p.generate(req)).rejects.toMatchObject({ kind: "quota" });

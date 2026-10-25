@@ -75,8 +75,10 @@ export class GeminiProvider implements AIProvider {
         return await this.generateWith(model, req);
       } catch (e) {
         last = e;
-        // Only a rate limit moves on to the next model; anything else is final.
-        if (!(e instanceof HttpError && e.status === 429)) break;
+        console.error(`[ai] gemini ${model} failed:`, e instanceof HttpError ? `HTTP ${e.status} ${e.body.error?.status ?? ""} ${e.message}` : e instanceof Error ? e.message : e);
+        // Rate limits, overloaded models, server errors and timeouts move on to the next model; anything else is final.
+        const retryable = (e instanceof HttpError && (e.status === 429 || e.status >= 500)) || (e instanceof AIError && e.kind === "unavailable");
+        if (!retryable) break;
       }
     }
     throw toAIError(last);

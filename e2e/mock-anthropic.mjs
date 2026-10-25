@@ -72,6 +72,8 @@ function gemini(req, res, body) {
     return json(400, { error: { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID" }] } });
   if (model.startsWith("exhausted"))
     return json(429, { error: { code: 429, message: "You exceeded your current quota.", status: "RESOURCE_EXHAUSTED", details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } });
+  if (model.startsWith("overloaded"))
+    return json(503, { error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } });
   if (model.startsWith("schema-strict") && body.generationConfig?.responseJsonSchema)
     return json(400, { error: { code: 400, message: "Invalid JSON payload: unsupported schema keyword.", status: "INVALID_ARGUMENT" } });
   const system = body.systemInstruction?.parts?.[0]?.text ?? "";
